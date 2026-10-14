@@ -1,0 +1,64 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# Virtual environments
+.venv/
+venv/
+.env
+.env.*
+!.env.example
+
+# Model weights and local caches
+models/
+weights/
+checkpoints/
+hf_cache/
+huggingface/
+.cache/
+*.safetensors
+*.gguf
+*.pt
+*.pth
+*.onnx
+
+# Native build artifacts and kernel caches
+*.o
+*.obj
+*.so
+*.a
+*.dll
+*.dylib
+.ninja_deps
+.ninja_log
+torch_extensions/
+triton_cache/
+.triton/
+
+# Profiling artifacts (large binary files)
+*.ncu-rep
+*.nsys-rep
+*.qdrep
+*.nvprof
+*.pt.trace.json
+
+# Local logs and generated output
+logs/
+*.log
+profiling/raw/
+benchmarks/results/raw/
+benchmarks/reports/generated/
+
+# Editors
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
