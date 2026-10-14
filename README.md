@@ -65,7 +65,7 @@ The initial target environment is:
 | **Python Runtime** | Python 3.12 managed via `uv` |
 | **Deep Learning Framework** | PyTorch 2.13.0+cu130 (Nightly with `sm_120` SASS support) |
 | **Reference Engine** | vLLM 0.31.0 |
-| **Target Model** | `Qwen/Qwen2.5-Coder-3B-Instruct` |
+| **Target Model** | `Qwen/Qwen2.5-Coder-1.5B-Instruct` |
 | **GPU Profiling** | NVIDIA Nsight Systems (`nsys`) & Nsight Compute (`ncu`) |
 
 The initial model is deliberately small enough to make iterative experiments practical on a laptop GPU. Actual memory use and available KV-cache capacity will be measured rather than inferred from model weight size alone.
