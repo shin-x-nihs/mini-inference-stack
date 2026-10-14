@@ -62,3 +62,5 @@ benchmarks/reports/generated/
 .DS_Store
 Thumbs.db
 desktop.ini
+.chainlit/
+.files/
