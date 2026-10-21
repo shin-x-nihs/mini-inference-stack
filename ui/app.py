@@ -1,25 +1,48 @@
-
 import os
+from pathlib import Path
 import time
 
 import chainlit as cl
 from openai import AsyncOpenAI
+import yaml
 
+# Resolve repository root and load config.yaml
+REPO_ROOT = Path(__file__).resolve().parent.parent
+CONFIG_PATH = REPO_ROOT / "config.yaml"
 
-BASE_URL = os.getenv("INFERENCE_BASE_URL", "http://localhost:8000/v1")
+config = {}
+if CONFIG_PATH.exists():
+    with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+        config = yaml.safe_load(f) or {}
+
+model_cfg = config.get("model", {})
+server_cfg = config.get("server", {})
+ui_cfg = config.get("ui", {})
+
+# Client connects to localhost even if server binds to 0.0.0.0
+host = server_cfg.get("host", "localhost")
+if host == "0.0.0.0":
+    host = "localhost"
+port = server_cfg.get("port", 8000)
+
+DEFAULT_BASE_URL = f"http://{host}:{port}/v1"
+BASE_URL = os.getenv("INFERENCE_BASE_URL", DEFAULT_BASE_URL)
 MODEL_NAME = os.getenv(
     "INFERENCE_MODEL",
-    "Qwen/Qwen2.5-Coder-1.5B-Instruct",
+    model_cfg.get("name", "Qwen/Qwen2.5-Coder-1.5B-Instruct"),
 )
+
+MAX_TOKENS = int(os.getenv("INFERENCE_MAX_TOKENS", ui_cfg.get("max_tokens", 512)))
+TEMPERATURE = float(
+    os.getenv("INFERENCE_TEMPERATURE", ui_cfg.get("temperature", 0.2))
+)
+TIMEOUT = float(os.getenv("INFERENCE_TIMEOUT", ui_cfg.get("timeout", 300.0)))
 
 client = AsyncOpenAI(
     base_url=BASE_URL,
     api_key=os.getenv("INFERENCE_API_KEY", "EMPTY"),
-    timeout=300.0,
+    timeout=TIMEOUT,
 )
-
-MAX_TOKENS = 512
-TEMPERATURE = 0.2
 
 
 @cl.on_chat_start
@@ -32,9 +55,7 @@ async def main(message: cl.Message):
     history = cl.user_session.get("history") or []
 
     # Do not commit the new turn to history until the request succeeds.
-    messages = history + [
-        {"role": "user", "content": message.content}
-    ]
+    messages = history + [{"role": "user", "content": message.content}]
 
     response_message = cl.Message(content="")
     await response_message.send()
@@ -99,9 +120,7 @@ async def main(message: cl.Message):
                     metrics.append(f"Approx. speed: {tok_s:.1f} tok/s")
 
             await response_message.stream_token(
-                "\n\n---\n*"
-                + " | ".join(metrics)
-                + "*"
+                "\n\n---\n*" + " | ".join(metrics) + "*"
             )
 
         # Store only the actual conversation, never the timing footer.
@@ -112,11 +131,9 @@ async def main(message: cl.Message):
             ]
         )
         cl.user_session.set("history", history)
-
         await response_message.update()
 
     except Exception as exc:
-        # Avoid adding a failed or partial response to conversation history.
         await response_message.stream_token(
             f"\n\n**Request failed:** {type(exc).__name__}: {exc}"
         )

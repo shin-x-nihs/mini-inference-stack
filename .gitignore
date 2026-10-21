@@ -44,6 +44,7 @@ triton_cache/
 *.qdrep
 *.nvprof
 *.pt.trace.json
+*.sqlite
 
 # Local logs and generated output
 logs/

@@ -1,0 +1,28 @@
+model:
+  name: "Qwen/Qwen2.5-Coder-1.5B-Instruct"
+  dtype: "bfloat16"
+  max_model_len: 9216  # 8192 max input + 64 output + chat template headroom
+
+server:
+  host: "0.0.0.0"
+  port: 8000
+  gpu_memory_utilization: 0.70
+  enable_prefix_caching: false
+
+ui:
+  max_tokens: 512
+  temperature: 0.2
+  timeout: 300.0
+
+benchmarks:
+  random_seed: 42
+  # Plot 1: Throughput vs. Latency across client concurrency
+  pareto:
+    input_len: 512
+    output_len: 128
+    concurrencies: [1, 2, 4, 8, 16, 32, 64]
+  # Plots 2 & 3: Prefill (TTFT) & Decode (TPOT) scaling across context lengths at C=1
+  context_sweep:
+    lengths: [128, 256, 512, 1024, 2048, 4096, 8192]
+    output_len: 64
+    num_prompts: 10

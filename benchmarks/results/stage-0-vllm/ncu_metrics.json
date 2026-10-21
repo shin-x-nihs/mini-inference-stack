@@ -1,0 +1,8 @@
+{
+  "stage": "stage-0-vllm",
+  "hardware_ceilings": {
+    "estimated_peak_dram_gbps": 512.0,
+    "estimated_peak_tensor_tflops": 100.0
+  },
+  "kernels": []
+}
