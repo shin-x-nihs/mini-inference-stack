@@ -10,6 +10,9 @@
   <img src="https://img.shields.io/badge/PyTorch-2.13.0%2Bcu130-EE4C2C?style=for-the-badge&logo=pytorch&logoColor=white" alt="PyTorch 2.13.0+cu130" />
   <img src="https://img.shields.io/badge/Environment-uv-blueviolet?style=for-the-badge" alt="uv package manager" />
   <img src="https://img.shields.io/badge/License-MIT-blue?style=for-the-badge" alt="MIT License" />
+  <a href="https://shin-x-nihs.github.io/mini-inference-stack/">
+    <img src="https://img.shields.io/badge/Live_Dashboard-GitHub_Pages-2ea44f?style=for-the-badge&logo=github&logoColor=white" alt="Live Dashboard" />
+  </a>
 </p>
 
 ---
@@ -26,6 +29,7 @@ The goal isn't to build a replacement for vLLM. It's to learn by experimenting: 
 
 Client benchmarks measure response times and throughput. NVIDIA Nsight Systems (`nsys`) and Nsight Compute (`ncu`) help investigate what's happening inside the CPU and GPU.
 
+Explore the results: **[Interactive benchmark dashboard](https://shin-x-nihs.github.io/mini-inference-stack/)**.
 ---
 
 ## What I Want to Learn
