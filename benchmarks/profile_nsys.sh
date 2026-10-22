@@ -128,7 +128,7 @@ mv -f "${LATEST_REP}" "${REP_FILE}"
 echo ">>> [3/4] Exporting trace to SQLite..."
 nsys export --type=sqlite --output="${SQLITE_FILE}" --force-overwrite=true "${REP_FILE}"
 
-# 6. Parse SQLite database and compute Table A metrics into JSON
+# 6. Parse SQLite database and compute timeline metrics into JSON
 echo ">>> [4/4] Computing timeline metrics (interval union & sync overhead)..."
 uv run python3 - "${SQLITE_FILE}" "${PROBE_JSON}" "${METRICS_JSON}" "${PROF_OUT}" << 'EOF'
 import json, sqlite3, sys

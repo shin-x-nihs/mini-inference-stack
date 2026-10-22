@@ -33,7 +33,6 @@ mkdir -p "${PROF_DIR}" "${RES_DIR}"
 
 REP_FILE="${PROF_DIR}/kernels.ncu-rep"
 CSV_FILE="${PROF_DIR}/ncu_raw.csv"
-TABLE_MD="${PROF_DIR}/ncu_table.md"
 METRICS_JSON="${RES_DIR}/ncu_metrics.json"
 RUNNER_PY="${PROF_DIR}/_ncu_runner.py"
 
@@ -134,11 +133,11 @@ VLLM_ENABLE_V1_MULTIPROCESSING=0 ncu \
 echo ">>> [2/3] Exporting raw counters to CSV..."
 ncu --import "${REP_FILE}" --csv --page raw > "${CSV_FILE}"
 
-echo ">>> [3/3] Building Table B and Roofline JSON..."
-uv run python3 - "${CSV_FILE}" "${TABLE_MD}" "${METRICS_JSON}" "${STAGE}" << 'EOF'
+echo ">>> [3/3] Building Roofline and Kernel JSON..."
+uv run python3 - "${CSV_FILE}" "${METRICS_JSON}" "${STAGE}" << 'EOF'
 import csv, json, sys
 
-csv_path, md_path, json_path, stage = sys.argv[1:5]
+csv_path, json_path, stage = sys.argv[1:4]
 
 # Keep only valid CSV lines starting from the "ID" header
 with open(csv_path, "r", encoding="utf-8") as f:
@@ -311,27 +310,9 @@ payload = {
 with open(json_path, "w", encoding="utf-8") as f:
     json.dump(payload, f, indent=2)
 
-md_lines = [
-    "### Table B: Kernel Details (Nsight Compute - Layer 0)",
-    "",
-    "| Kernel Role | Grid Size | Time (us) | DRAM (%) | Compute (%) | Active Warps (%) | Regs | Spills (B) | AI (FLOP/B) | TFLOP/s | Dominant Bottleneck |",
-    "| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :--- |"
-]
-for k in final_kernels:
-    md_lines.append(
-        f"| **{k['label']}** | `{k['grid_size']}` | {k['execution_time_us']} | {k['dram_utilization_pct']}% | "
-        f"{k['compute_utilization_pct']}% | {k['active_warps_pct']}% | {k['registers_per_thread']} | "
-        f"{k['local_spills_bytes']} | {k['arithmetic_intensity_flop_byte']} | {k['attained_tflops']} | {k['dominant_bottleneck']} |"
-    )
-
-md_text = "\n".join(md_lines) + "\n"
-with open(md_path, "w", encoding="utf-8") as f:
-    f.write(md_text)
-
-print("\n" + md_text)
+print(f"Extracted {len(final_kernels)} kernel metrics into {json_path}")
 EOF
 
 rm -f "${RUNNER_PY}" "${CSV_FILE}"
 echo "Saved NCU GUI report: ${REP_FILE}"
-echo "Saved Table B MD:     ${TABLE_MD}"
 echo "Saved Roofline JSON:  ${METRICS_JSON}"

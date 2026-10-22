@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Inference Kernel Optimization Benchmark</title>
+    <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            background-color: #0a0a0a;
+            color: #ffffff;
+            font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            padding: 28px 36px;
+        }
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            border-bottom: 2px solid #ff2a2a;
+            padding-bottom: 14px;
+            margin-bottom: 24px;
+        }
+        header h1 {
+            font-size: 22px;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+        }
+        header .meta {
+            font-family: monospace;
+            font-size: 13px;
+            color: #a0a0a0;
+        }
+        header .meta span { color: #ff2a2a; font-weight: 600; }
+        .grid-2x2 {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 20px;
+            margin-bottom: 24px;
+        }
+        .card {
+            background-color: #121212;
+            border: 1px solid #242424;
+            border-top: 2px solid #ff2a2a;
+            border-radius: 4px;
+            padding: 12px;
+        }
+        .tables-container {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        .table-card { padding: 20px; overflow-x: auto; }
+        .table-card h2 {
+            font-size: 16px;
+            margin-bottom: 14px;
+            color: #ffffff;
+            letter-spacing: -0.01em;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-family: "JetBrains Mono", Consolas, monospace;
+            font-size: 12.5px;
+        }
+        th, td {
+            text-align: left;
+            padding: 10px 12px;
+            border-bottom: 1px solid #222222;
+        }
+        th {
+            color: #a0a0a0;
+            font-weight: 600;
+            text-transform: uppercase;
+            font-size: 11px;
+            letter-spacing: 0.04em;
+            background-color: #171717;
+        }
+        tr:hover td { background-color: #191919; }
+        .stage-cell { font-weight: 700; color: #ffffff; }
+        .highlight-red { color: #ff2a2a; font-weight: 700; }
+        .sub { color: #777777; font-size: 11px; }
+        .badge {
+            display: inline-block;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 10px;
+            font-weight: 700;
+            margin-right: 6px;
+            text-transform: uppercase;
+        }
+        .badge-prefill { background: #ff2a2a; color: #000000; }
+        .badge-decode { background: #ffffff; color: #000000; }
+        .bottleneck { color: #ff7b54; }
+        @media (max-width: 1100px) { .grid-2x2 { grid-template-columns: 1fr; } }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>LLM INFERENCE & KERNEL BENCHMARK</h1>
+        <div class="meta">Active Stages: <span>stage-0-vllm</span></div>
+    </header>
+
+    <div class="grid-2x2">
+        <div class="card"><div style="height:420px; width:100%;">                            <div id="8312a463-fb2c-4a9c-8914-4d90cbc93339" class="plotly-graph-div" style="height:100%; width:100%;"></div>            <script>                window.PLOTLYENV=window.PLOTLYENV || {};                                if (document.getElementById("8312a463-fb2c-4a9c-8914-4d90cbc93339")) {                    Plotly.newPlot(                        "8312a463-fb2c-4a9c-8914-4d90cbc93339",                        [{"hovertemplate":"\u003cb\u003e%{fullData.name}\u003c\u002fb\u003e (%{text})\u003cbr\u003eThroughput: %{x:.1f} tok\u002fs\u003cbr\u003eLatency: %{y:.2f} ms\u003cextra\u003e\u003c\u002fextra\u003e","line":{"color":"#ff2a2a","width":2.5},"marker":{"color":"#ff2a2a","line":{"color":"#121212","width":1},"size":8},"mode":"lines+markers+text","name":"stage-0-vllm","text":["C=1","C=2","C=4","C=8","C=16","C=32","C=64"],"textposition":"top center","x":[0.0,0.0,0.0,0.0,0.0,0.0,0.0],"y":[0.0,0.0,0.0,0.0,0.0,0.0,0.0],"type":"scatter"}],                        {"font":{"color":"#a0a0a0","family":"Inter, monospace","size":12},"height":420,"hovermode":"closest","legend":{"bgcolor":"rgba(0,0,0,0)","font":{"color":"#ffffff","size":11},"orientation":"h","x":1.0,"xanchor":"right","y":1.02,"yanchor":"bottom"},"margin":{"b":55,"l":60,"r":30,"t":65},"paper_bgcolor":"#121212","plot_bgcolor":"#121212","title":{"font":{"color":"#ffffff","family":"Inter, sans-serif","size":17},"text":"Throughput vs. Latency (System Capacity)","x":0.02},"xaxis":{"gridcolor":"#222222","linecolor":"#333333","title":{"font":{"color":"#ffffff"},"text":"System Throughput (tokens\u002fs)"},"zerolinecolor":"#222222","range":[0.0,1.0]},"yaxis":{"gridcolor":"#222222","linecolor":"#333333","title":{"font":{"color":"#ffffff"},"text":"ITL P99 (ms)"},"zerolinecolor":"#222222","range":[0.0,1.0]},"template":{"data":{"histogram2dcontour":[{"type":"histogram2dcontour","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"choropleth":[{"type":"choropleth","colorbar":{"outlinewidth":0,"ticks":""}}],"histogram2d":[{"type":"histogram2d","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"heatmap":[{"type":"heatmap","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"contourcarpet":[{"type":"contourcarpet","colorbar":{"outlinewidth":0,"ticks":""}}],"contour":[{"type":"contour","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"surface":[{"type":"surface","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"mesh3d":[{"type":"mesh3d","colorbar":{"outlinewidth":0,"ticks":""}}],"scatter":[{"fillpattern":{"fillmode":"overlay","size":10,"solidity":0.2},"type":"scatter"}],"parcoords":[{"type":"parcoords","line":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatterpolargl":[{"type":"scatterpolargl","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"bar":[{"error_x":{"color":"#2a3f5f"},"error_y":{"color":"#2a3f5f"},"marker":{"line":{"color":"#E5ECF6","width":0.5},"pattern":{"fillmode":"overlay","size":10,"solidity":0.2}},"type":"bar"}],"scattergeo":[{"type":"scattergeo","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatterpolar":[{"type":"scatterpolar","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"histogram":[{"marker":{"pattern":{"fillmode":"overlay","size":10,"solidity":0.2}},"type":"histogram"}],"scattergl":[{"type":"scattergl","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatter3d":[{"type":"scatter3d","line":{"colorbar":{"outlinewidth":0,"ticks":""}},"marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scattermap":[{"type":"scattermap","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatterternary":[{"type":"scatterternary","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scattercarpet":[{"type":"scattercarpet","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"carpet":[{"aaxis":{"endlinecolor":"#2a3f5f","gridcolor":"white","linecolor":"white","minorgridcolor":"white","startlinecolor":"#2a3f5f"},"baxis":{"endlinecolor":"#2a3f5f","gridcolor":"white","linecolor":"white","minorgridcolor":"white","startlinecolor":"#2a3f5f"},"type":"carpet"}],"table":[{"cells":{"fill":{"color":"#EBF0F8"},"line":{"color":"white"}},"header":{"fill":{"color":"#C8D4E3"},"line":{"color":"white"}},"type":"table"}],"barpolar":[{"marker":{"line":{"color":"#E5ECF6","width":0.5},"pattern":{"fillmode":"overlay","size":10,"solidity":0.2}},"type":"barpolar"}],"pie":[{"automargin":true,"type":"pie"}]},"layout":{"autotypenumbers":"strict","colorway":["#636efa","#EF553B","#00cc96","#ab63fa","#FFA15A","#19d3f3","#FF6692","#B6E880","#FF97FF","#FECB52"],"font":{"color":"#2a3f5f"},"hovermode":"closest","hoverlabel":{"align":"left"},"paper_bgcolor":"white","plot_bgcolor":"#E5ECF6","polar":{"bgcolor":"#E5ECF6","angularaxis":{"gridcolor":"white","linecolor":"white","ticks":""},"radialaxis":{"gridcolor":"white","linecolor":"white","ticks":""}},"ternary":{"bgcolor":"#E5ECF6","aaxis":{"gridcolor":"white","linecolor":"white","ticks":""},"baxis":{"gridcolor":"white","linecolor":"white","ticks":""},"caxis":{"gridcolor":"white","linecolor":"white","ticks":""}},"coloraxis":{"colorbar":{"outlinewidth":0,"ticks":""}},"colorscale":{"sequential":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]],"sequentialminus":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]],"diverging":[[0,"#8e0152"],[0.1,"#c51b7d"],[0.2,"#de77ae"],[0.3,"#f1b6da"],[0.4,"#fde0ef"],[0.5,"#f7f7f7"],[0.6,"#e6f5d0"],[0.7,"#b8e186"],[0.8,"#7fbc41"],[0.9,"#4d9221"],[1,"#276419"]]},"xaxis":{"gridcolor":"white","linecolor":"white","ticks":"","title":{"standoff":15},"zerolinecolor":"white","automargin":true,"zerolinewidth":2},"yaxis":{"gridcolor":"white","linecolor":"white","ticks":"","title":{"standoff":15},"zerolinecolor":"white","automargin":true,"zerolinewidth":2},"scene":{"xaxis":{"backgroundcolor":"#E5ECF6","gridcolor":"white","linecolor":"white","showbackground":true,"ticks":"","zerolinecolor":"white","gridwidth":2},"yaxis":{"backgroundcolor":"#E5ECF6","gridcolor":"white","linecolor":"white","showbackground":true,"ticks":"","zerolinecolor":"white","gridwidth":2},"zaxis":{"backgroundcolor":"#E5ECF6","gridcolor":"white","linecolor":"white","showbackground":true,"ticks":"","zerolinecolor":"white","gridwidth":2}},"shapedefaults":{"line":{"color":"#2a3f5f"}},"annotationdefaults":{"arrowcolor":"#2a3f5f","arrowhead":0,"arrowwidth":1},"geo":{"bgcolor":"white","landcolor":"#E5ECF6","subunitcolor":"white","showland":true,"showlakes":true,"lakecolor":"white"},"title":{"x":0.05}}},"updatemenus":[{"bgcolor":"#1a1a1a","bordercolor":"#ff2a2a","borderwidth":1,"buttons":[{"args":[{"y":[[0.0,0.0,0.0,0.0,0.0,0.0,0.0]]},{"yaxis.title.text":"ITL P99 (ms)","yaxis.range":[0.0,1.0]}],"label":"ITL P99 (ms)","method":"update"},{"args":[{"y":[[0.0,0.0,0.0,0.0,0.0,0.0,0.0]]},{"yaxis.title.text":"ITL P90 (ms)","yaxis.range":[0.0,1.0]}],"label":"ITL P90 (ms)","method":"update"},{"args":[{"y":[[0.0,0.0,0.0,0.0,0.0,0.0,0.0]]},{"yaxis.title.text":"ITL P50 (ms)","yaxis.range":[0.0,1.0]}],"label":"ITL P50 (ms)","method":"update"},{"args":[{"y":[[0.0,0.0,0.0,0.0,0.0,0.0,0.0]]},{"yaxis.title.text":"TPOT Mean (ms\u002ftoken)","yaxis.range":[0.0,1.0]}],"label":"TPOT Mean (ms\u002ftoken)","method":"update"}],"direction":"down","font":{"color":"#ffffff","size":11},"type":"dropdown","x":1.0,"xanchor":"right","y":1.18,"yanchor":"top"}]},                        {"responsive": true, "displaylogo": false}                    )                };            </script>        </div></div>
+        <div class="card"><div style="height:420px; width:100%;">                            <div id="3a59b851-6e98-456c-a84e-723b0d6181a8" class="plotly-graph-div" style="height:100%; width:100%;"></div>            <script>                window.PLOTLYENV=window.PLOTLYENV || {};                                if (document.getElementById("3a59b851-6e98-456c-a84e-723b0d6181a8")) {                    Plotly.newPlot(                        "3a59b851-6e98-456c-a84e-723b0d6181a8",                        [{"hovertemplate":"\u003cb\u003e%{fullData.name}\u003c\u002fb\u003e\u003cbr\u003ePrompt: %{x} tok\u003cbr\u003eTTFT: %{y:.2f} ms\u003cextra\u003e\u003c\u002fextra\u003e","line":{"color":"#ff2a2a","width":2.5},"marker":{"color":"#ff2a2a","size":8},"mode":"lines+markers","name":"stage-0-vllm","x":[128,256,512,1024,2048,4096,8192],"y":[0.0,0.0,0.0,0.0,0.0,0.0,0.0],"type":"scatter"}],                        {"font":{"color":"#a0a0a0","family":"Inter, monospace","size":12},"height":420,"hovermode":"closest","legend":{"bgcolor":"rgba(0,0,0,0)","font":{"color":"#ffffff","size":11},"orientation":"h","x":1.0,"xanchor":"right","y":1.02,"yanchor":"bottom"},"margin":{"b":55,"l":60,"r":30,"t":65},"paper_bgcolor":"#121212","plot_bgcolor":"#121212","title":{"font":{"color":"#ffffff","family":"Inter, sans-serif","size":17},"text":"Prompt Size vs. Time to First Token","x":0.02},"xaxis":{"gridcolor":"#222222","linecolor":"#333333","title":{"font":{"color":"#ffffff"},"text":"Input Prompt Length (tokens)"},"zerolinecolor":"#222222","range":[0,8847.36]},"yaxis":{"gridcolor":"#222222","linecolor":"#333333","title":{"font":{"color":"#ffffff"},"text":"Time to First Token - TTFT (ms)"},"zerolinecolor":"#222222","range":[0.0,1.0]},"template":{"data":{"histogram2dcontour":[{"type":"histogram2dcontour","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"choropleth":[{"type":"choropleth","colorbar":{"outlinewidth":0,"ticks":""}}],"histogram2d":[{"type":"histogram2d","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"heatmap":[{"type":"heatmap","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"contourcarpet":[{"type":"contourcarpet","colorbar":{"outlinewidth":0,"ticks":""}}],"contour":[{"type":"contour","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"surface":[{"type":"surface","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"mesh3d":[{"type":"mesh3d","colorbar":{"outlinewidth":0,"ticks":""}}],"scatter":[{"fillpattern":{"fillmode":"overlay","size":10,"solidity":0.2},"type":"scatter"}],"parcoords":[{"type":"parcoords","line":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatterpolargl":[{"type":"scatterpolargl","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"bar":[{"error_x":{"color":"#2a3f5f"},"error_y":{"color":"#2a3f5f"},"marker":{"line":{"color":"#E5ECF6","width":0.5},"pattern":{"fillmode":"overlay","size":10,"solidity":0.2}},"type":"bar"}],"scattergeo":[{"type":"scattergeo","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatterpolar":[{"type":"scatterpolar","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"histogram":[{"marker":{"pattern":{"fillmode":"overlay","size":10,"solidity":0.2}},"type":"histogram"}],"scattergl":[{"type":"scattergl","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatter3d":[{"type":"scatter3d","line":{"colorbar":{"outlinewidth":0,"ticks":""}},"marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scattermap":[{"type":"scattermap","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatterternary":[{"type":"scatterternary","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scattercarpet":[{"type":"scattercarpet","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"carpet":[{"aaxis":{"endlinecolor":"#2a3f5f","gridcolor":"white","linecolor":"white","minorgridcolor":"white","startlinecolor":"#2a3f5f"},"baxis":{"endlinecolor":"#2a3f5f","gridcolor":"white","linecolor":"white","minorgridcolor":"white","startlinecolor":"#2a3f5f"},"type":"carpet"}],"table":[{"cells":{"fill":{"color":"#EBF0F8"},"line":{"color":"white"}},"header":{"fill":{"color":"#C8D4E3"},"line":{"color":"white"}},"type":"table"}],"barpolar":[{"marker":{"line":{"color":"#E5ECF6","width":0.5},"pattern":{"fillmode":"overlay","size":10,"solidity":0.2}},"type":"barpolar"}],"pie":[{"automargin":true,"type":"pie"}]},"layout":{"autotypenumbers":"strict","colorway":["#636efa","#EF553B","#00cc96","#ab63fa","#FFA15A","#19d3f3","#FF6692","#B6E880","#FF97FF","#FECB52"],"font":{"color":"#2a3f5f"},"hovermode":"closest","hoverlabel":{"align":"left"},"paper_bgcolor":"white","plot_bgcolor":"#E5ECF6","polar":{"bgcolor":"#E5ECF6","angularaxis":{"gridcolor":"white","linecolor":"white","ticks":""},"radialaxis":{"gridcolor":"white","linecolor":"white","ticks":""}},"ternary":{"bgcolor":"#E5ECF6","aaxis":{"gridcolor":"white","linecolor":"white","ticks":""},"baxis":{"gridcolor":"white","linecolor":"white","ticks":""},"caxis":{"gridcolor":"white","linecolor":"white","ticks":""}},"coloraxis":{"colorbar":{"outlinewidth":0,"ticks":""}},"colorscale":{"sequential":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]],"sequentialminus":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]],"diverging":[[0,"#8e0152"],[0.1,"#c51b7d"],[0.2,"#de77ae"],[0.3,"#f1b6da"],[0.4,"#fde0ef"],[0.5,"#f7f7f7"],[0.6,"#e6f5d0"],[0.7,"#b8e186"],[0.8,"#7fbc41"],[0.9,"#4d9221"],[1,"#276419"]]},"xaxis":{"gridcolor":"white","linecolor":"white","ticks":"","title":{"standoff":15},"zerolinecolor":"white","automargin":true,"zerolinewidth":2},"yaxis":{"gridcolor":"white","linecolor":"white","ticks":"","title":{"standoff":15},"zerolinecolor":"white","automargin":true,"zerolinewidth":2},"scene":{"xaxis":{"backgroundcolor":"#E5ECF6","gridcolor":"white","linecolor":"white","showbackground":true,"ticks":"","zerolinecolor":"white","gridwidth":2},"yaxis":{"backgroundcolor":"#E5ECF6","gridcolor":"white","linecolor":"white","showbackground":true,"ticks":"","zerolinecolor":"white","gridwidth":2},"zaxis":{"backgroundcolor":"#E5ECF6","gridcolor":"white","linecolor":"white","showbackground":true,"ticks":"","zerolinecolor":"white","gridwidth":2}},"shapedefaults":{"line":{"color":"#2a3f5f"}},"annotationdefaults":{"arrowcolor":"#2a3f5f","arrowhead":0,"arrowwidth":1},"geo":{"bgcolor":"white","landcolor":"#E5ECF6","subunitcolor":"white","showland":true,"showlakes":true,"lakecolor":"white"},"title":{"x":0.05}}}},                        {"responsive": true, "displaylogo": false}                    )                };            </script>        </div></div>
+        <div class="card"><div style="height:420px; width:100%;">                            <div id="30553dad-9205-42fa-a0fe-3da267906295" class="plotly-graph-div" style="height:100%; width:100%;"></div>            <script>                window.PLOTLYENV=window.PLOTLYENV || {};                                if (document.getElementById("30553dad-9205-42fa-a0fe-3da267906295")) {                    Plotly.newPlot(                        "30553dad-9205-42fa-a0fe-3da267906295",                        [{"hovertemplate":"\u003cb\u003e%{fullData.name}\u003c\u002fb\u003e\u003cbr\u003eContext: %{x} tok\u003cbr\u003eValue: %{y:.2f}\u003cextra\u003e\u003c\u002fextra\u003e","line":{"color":"#ff2a2a","width":2.5},"marker":{"color":"#ff2a2a","size":8},"mode":"lines+markers","name":"stage-0-vllm","x":[128,256,512,1024,2048,4096,8192],"y":[0.0,0.0,0.0,0.0,0.0,0.0,0.0],"type":"scatter"}],                        {"font":{"color":"#a0a0a0","family":"Inter, monospace","size":12},"height":420,"hovermode":"closest","legend":{"bgcolor":"rgba(0,0,0,0)","font":{"color":"#ffffff","size":11},"orientation":"h","x":1.0,"xanchor":"right","y":1.02,"yanchor":"bottom"},"margin":{"b":55,"l":60,"r":30,"t":65},"paper_bgcolor":"#121212","plot_bgcolor":"#121212","title":{"font":{"color":"#ffffff","family":"Inter, sans-serif","size":17},"text":"Context Length vs. Generation Speed","x":0.02},"xaxis":{"gridcolor":"#222222","linecolor":"#333333","title":{"font":{"color":"#ffffff"},"text":"Context Sequence Length (tokens)"},"zerolinecolor":"#222222","range":[0,8847.36]},"yaxis":{"gridcolor":"#222222","linecolor":"#333333","title":{"font":{"color":"#ffffff"},"text":"TPOT (ms\u002ftoken)"},"zerolinecolor":"#222222","range":[0.0,1.0]},"template":{"data":{"histogram2dcontour":[{"type":"histogram2dcontour","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"choropleth":[{"type":"choropleth","colorbar":{"outlinewidth":0,"ticks":""}}],"histogram2d":[{"type":"histogram2d","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"heatmap":[{"type":"heatmap","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"contourcarpet":[{"type":"contourcarpet","colorbar":{"outlinewidth":0,"ticks":""}}],"contour":[{"type":"contour","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"surface":[{"type":"surface","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"mesh3d":[{"type":"mesh3d","colorbar":{"outlinewidth":0,"ticks":""}}],"scatter":[{"fillpattern":{"fillmode":"overlay","size":10,"solidity":0.2},"type":"scatter"}],"parcoords":[{"type":"parcoords","line":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatterpolargl":[{"type":"scatterpolargl","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"bar":[{"error_x":{"color":"#2a3f5f"},"error_y":{"color":"#2a3f5f"},"marker":{"line":{"color":"#E5ECF6","width":0.5},"pattern":{"fillmode":"overlay","size":10,"solidity":0.2}},"type":"bar"}],"scattergeo":[{"type":"scattergeo","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatterpolar":[{"type":"scatterpolar","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"histogram":[{"marker":{"pattern":{"fillmode":"overlay","size":10,"solidity":0.2}},"type":"histogram"}],"scattergl":[{"type":"scattergl","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatter3d":[{"type":"scatter3d","line":{"colorbar":{"outlinewidth":0,"ticks":""}},"marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scattermap":[{"type":"scattermap","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatterternary":[{"type":"scatterternary","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scattercarpet":[{"type":"scattercarpet","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"carpet":[{"aaxis":{"endlinecolor":"#2a3f5f","gridcolor":"white","linecolor":"white","minorgridcolor":"white","startlinecolor":"#2a3f5f"},"baxis":{"endlinecolor":"#2a3f5f","gridcolor":"white","linecolor":"white","minorgridcolor":"white","startlinecolor":"#2a3f5f"},"type":"carpet"}],"table":[{"cells":{"fill":{"color":"#EBF0F8"},"line":{"color":"white"}},"header":{"fill":{"color":"#C8D4E3"},"line":{"color":"white"}},"type":"table"}],"barpolar":[{"marker":{"line":{"color":"#E5ECF6","width":0.5},"pattern":{"fillmode":"overlay","size":10,"solidity":0.2}},"type":"barpolar"}],"pie":[{"automargin":true,"type":"pie"}]},"layout":{"autotypenumbers":"strict","colorway":["#636efa","#EF553B","#00cc96","#ab63fa","#FFA15A","#19d3f3","#FF6692","#B6E880","#FF97FF","#FECB52"],"font":{"color":"#2a3f5f"},"hovermode":"closest","hoverlabel":{"align":"left"},"paper_bgcolor":"white","plot_bgcolor":"#E5ECF6","polar":{"bgcolor":"#E5ECF6","angularaxis":{"gridcolor":"white","linecolor":"white","ticks":""},"radialaxis":{"gridcolor":"white","linecolor":"white","ticks":""}},"ternary":{"bgcolor":"#E5ECF6","aaxis":{"gridcolor":"white","linecolor":"white","ticks":""},"baxis":{"gridcolor":"white","linecolor":"white","ticks":""},"caxis":{"gridcolor":"white","linecolor":"white","ticks":""}},"coloraxis":{"colorbar":{"outlinewidth":0,"ticks":""}},"colorscale":{"sequential":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]],"sequentialminus":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]],"diverging":[[0,"#8e0152"],[0.1,"#c51b7d"],[0.2,"#de77ae"],[0.3,"#f1b6da"],[0.4,"#fde0ef"],[0.5,"#f7f7f7"],[0.6,"#e6f5d0"],[0.7,"#b8e186"],[0.8,"#7fbc41"],[0.9,"#4d9221"],[1,"#276419"]]},"xaxis":{"gridcolor":"white","linecolor":"white","ticks":"","title":{"standoff":15},"zerolinecolor":"white","automargin":true,"zerolinewidth":2},"yaxis":{"gridcolor":"white","linecolor":"white","ticks":"","title":{"standoff":15},"zerolinecolor":"white","automargin":true,"zerolinewidth":2},"scene":{"xaxis":{"backgroundcolor":"#E5ECF6","gridcolor":"white","linecolor":"white","showbackground":true,"ticks":"","zerolinecolor":"white","gridwidth":2},"yaxis":{"backgroundcolor":"#E5ECF6","gridcolor":"white","linecolor":"white","showbackground":true,"ticks":"","zerolinecolor":"white","gridwidth":2},"zaxis":{"backgroundcolor":"#E5ECF6","gridcolor":"white","linecolor":"white","showbackground":true,"ticks":"","zerolinecolor":"white","gridwidth":2}},"shapedefaults":{"line":{"color":"#2a3f5f"}},"annotationdefaults":{"arrowcolor":"#2a3f5f","arrowhead":0,"arrowwidth":1},"geo":{"bgcolor":"white","landcolor":"#E5ECF6","subunitcolor":"white","showland":true,"showlakes":true,"lakecolor":"white"},"title":{"x":0.05}}},"updatemenus":[{"bgcolor":"#1a1a1a","bordercolor":"#ff2a2a","borderwidth":1,"buttons":[{"args":[{"y":[[0.0,0.0,0.0,0.0,0.0,0.0,0.0]]},{"yaxis.title.text":"TPOT (ms\u002ftoken)","yaxis.range":[0.0,1.0]}],"label":"TPOT (ms\u002ftoken)","method":"update"},{"args":[{"y":[[0.0,0.0,0.0,0.0,0.0,0.0,0.0]]},{"yaxis.title.text":"Generation Speed (tokens\u002fs\u002freq)","yaxis.range":[0.0,1.0]}],"label":"Generation Speed (tokens\u002fs\u002freq)","method":"update"}],"direction":"down","font":{"color":"#ffffff","size":11},"type":"dropdown","x":1.0,"xanchor":"right","y":1.18,"yanchor":"top"}]},                        {"responsive": true, "displaylogo": false}                    )                };            </script>        </div></div>
+        <div class="card"><div style="height:420px; width:100%;">                            <div id="b4ddf5cf-d702-49d8-967b-1a7c575dae2a" class="plotly-graph-div" style="height:100%; width:100%;"></div>            <script>                window.PLOTLYENV=window.PLOTLYENV || {};                                if (document.getElementById("b4ddf5cf-d702-49d8-967b-1a7c575dae2a")) {                    Plotly.newPlot(                        "b4ddf5cf-d702-49d8-967b-1a7c575dae2a",                        [{"hoverinfo":"skip","line":{"color":"#ff2a2a","dash":"dash","width":2},"mode":"lines","name":"Hardware Ceiling (512 GB\u002fs | 100 TFLOP\u002fs)","x":[0.02,195.3125,4096.0],"y":[0.01024,100.0,100.0],"type":"scatter"},{"customdata":[["Prefill",46.02,273.91],["Prefill",4142.56,28.12],["Prefill",52.93,148.99],["Prefill",27.87,76.58],["Prefill",737.54,11.47],["Prefill",243.71,345.01],["Decode",7.07,3.62],["Decode",178.05,320.58],["Decode",7.23,1.27],["Decode",25.98,82.97],["Decode",21.7,5.89],["Decode",10.02,4.47]],"hovertemplate":"\u003cb\u003e%{text}\u003c\u002fb\u003e (%{fullData.name} - %{customdata[0]})\u003cbr\u003eAI: %{x:.2f} FLOP\u002fB\u003cbr\u003ePerf: %{y:.3f} TFLOP\u002fs\u003cbr\u003eDRAM: %{customdata[2]:.1f} GB\u002fs\u003cbr\u003eDuration: %{customdata[1]:.2f} us\u003cextra\u003e\u003c\u002fextra\u003e","marker":{"color":"#ff2a2a","line":{"color":"#000000","width":1.5},"size":10,"symbol":["diamond","diamond","diamond","diamond","diamond","diamond","circle","circle","circle","circle","circle","circle"]},"mode":"markers+text","name":"stage-0-vllm","text":["Prefill Fused RMSNorm","Prefill Linear GEMM","Prefill RoPE Embedding","Prefill void vllm::reshape_and_cache","Prefill Attention (FlashDecode\u002fSplitKV)","Prefill SwiGLU Activation","Decode Fused RMSNorm","Decode Linear GEMV","Decode RoPE Embedding","Decode Attention (FlashDecode\u002fSplitKV)","Decode Attention Combine (Split-K)","Decode SwiGLU Activation"],"textfont":{"color":"#a0a0a0","size":10},"textposition":"top center","x":[1.658,968.366,1.729,0.982,1631.024,5.674,0.58,1.001,0.722,66.677,0.496,5.2],"y":[0.454,27.233,0.258,0.075,18.712,1.958,0.002,0.321,0.001,5.532,0.003,0.023],"type":"scatter"}],                        {"font":{"color":"#a0a0a0","family":"Inter, monospace","size":12},"height":420,"hovermode":"closest","legend":{"bgcolor":"rgba(0,0,0,0)","font":{"color":"#ffffff","size":11},"orientation":"h","x":1.0,"xanchor":"right","y":1.02,"yanchor":"bottom"},"margin":{"b":55,"l":60,"r":30,"t":65},"paper_bgcolor":"#121212","plot_bgcolor":"#121212","title":{"font":{"color":"#ffffff","family":"Inter, sans-serif","size":17},"text":"Hardware Roofline (Compute vs. Memory)","x":0.02},"xaxis":{"gridcolor":"#222222","linecolor":"#333333","title":{"font":{"color":"#ffffff"},"text":"Arithmetic Intensity (FLOP\u002fByte)"},"zerolinecolor":"#222222","type":"log","range":[-1.6989700043360187,3.612359947967774]},"yaxis":{"gridcolor":"#222222","linecolor":"#333333","title":{"font":{"color":"#ffffff"},"text":"Attained Performance (TFLOP\u002fs)"},"zerolinecolor":"#222222","type":"log","range":[-3.3979400086720375,2.255272505103306]},"template":{"data":{"histogram2dcontour":[{"type":"histogram2dcontour","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"choropleth":[{"type":"choropleth","colorbar":{"outlinewidth":0,"ticks":""}}],"histogram2d":[{"type":"histogram2d","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"heatmap":[{"type":"heatmap","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"contourcarpet":[{"type":"contourcarpet","colorbar":{"outlinewidth":0,"ticks":""}}],"contour":[{"type":"contour","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"surface":[{"type":"surface","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"mesh3d":[{"type":"mesh3d","colorbar":{"outlinewidth":0,"ticks":""}}],"scatter":[{"fillpattern":{"fillmode":"overlay","size":10,"solidity":0.2},"type":"scatter"}],"parcoords":[{"type":"parcoords","line":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatterpolargl":[{"type":"scatterpolargl","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"bar":[{"error_x":{"color":"#2a3f5f"},"error_y":{"color":"#2a3f5f"},"marker":{"line":{"color":"#E5ECF6","width":0.5},"pattern":{"fillmode":"overlay","size":10,"solidity":0.2}},"type":"bar"}],"scattergeo":[{"type":"scattergeo","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatterpolar":[{"type":"scatterpolar","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"histogram":[{"marker":{"pattern":{"fillmode":"overlay","size":10,"solidity":0.2}},"type":"histogram"}],"scattergl":[{"type":"scattergl","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatter3d":[{"type":"scatter3d","line":{"colorbar":{"outlinewidth":0,"ticks":""}},"marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scattermap":[{"type":"scattermap","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatterternary":[{"type":"scatterternary","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scattercarpet":[{"type":"scattercarpet","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"carpet":[{"aaxis":{"endlinecolor":"#2a3f5f","gridcolor":"white","linecolor":"white","minorgridcolor":"white","startlinecolor":"#2a3f5f"},"baxis":{"endlinecolor":"#2a3f5f","gridcolor":"white","linecolor":"white","minorgridcolor":"white","startlinecolor":"#2a3f5f"},"type":"carpet"}],"table":[{"cells":{"fill":{"color":"#EBF0F8"},"line":{"color":"white"}},"header":{"fill":{"color":"#C8D4E3"},"line":{"color":"white"}},"type":"table"}],"barpolar":[{"marker":{"line":{"color":"#E5ECF6","width":0.5},"pattern":{"fillmode":"overlay","size":10,"solidity":0.2}},"type":"barpolar"}],"pie":[{"automargin":true,"type":"pie"}]},"layout":{"autotypenumbers":"strict","colorway":["#636efa","#EF553B","#00cc96","#ab63fa","#FFA15A","#19d3f3","#FF6692","#B6E880","#FF97FF","#FECB52"],"font":{"color":"#2a3f5f"},"hovermode":"closest","hoverlabel":{"align":"left"},"paper_bgcolor":"white","plot_bgcolor":"#E5ECF6","polar":{"bgcolor":"#E5ECF6","angularaxis":{"gridcolor":"white","linecolor":"white","ticks":""},"radialaxis":{"gridcolor":"white","linecolor":"white","ticks":""}},"ternary":{"bgcolor":"#E5ECF6","aaxis":{"gridcolor":"white","linecolor":"white","ticks":""},"baxis":{"gridcolor":"white","linecolor":"white","ticks":""},"caxis":{"gridcolor":"white","linecolor":"white","ticks":""}},"coloraxis":{"colorbar":{"outlinewidth":0,"ticks":""}},"colorscale":{"sequential":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]],"sequentialminus":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]],"diverging":[[0,"#8e0152"],[0.1,"#c51b7d"],[0.2,"#de77ae"],[0.3,"#f1b6da"],[0.4,"#fde0ef"],[0.5,"#f7f7f7"],[0.6,"#e6f5d0"],[0.7,"#b8e186"],[0.8,"#7fbc41"],[0.9,"#4d9221"],[1,"#276419"]]},"xaxis":{"gridcolor":"white","linecolor":"white","ticks":"","title":{"standoff":15},"zerolinecolor":"white","automargin":true,"zerolinewidth":2},"yaxis":{"gridcolor":"white","linecolor":"white","ticks":"","title":{"standoff":15},"zerolinecolor":"white","automargin":true,"zerolinewidth":2},"scene":{"xaxis":{"backgroundcolor":"#E5ECF6","gridcolor":"white","linecolor":"white","showbackground":true,"ticks":"","zerolinecolor":"white","gridwidth":2},"yaxis":{"backgroundcolor":"#E5ECF6","gridcolor":"white","linecolor":"white","showbackground":true,"ticks":"","zerolinecolor":"white","gridwidth":2},"zaxis":{"backgroundcolor":"#E5ECF6","gridcolor":"white","linecolor":"white","showbackground":true,"ticks":"","zerolinecolor":"white","gridwidth":2}},"shapedefaults":{"line":{"color":"#2a3f5f"}},"annotationdefaults":{"arrowcolor":"#2a3f5f","arrowhead":0,"arrowwidth":1},"geo":{"bgcolor":"white","landcolor":"#E5ECF6","subunitcolor":"white","showland":true,"showlakes":true,"lakecolor":"white"},"title":{"x":0.05}}}},                        {"responsive": true, "displaylogo": false}                    )                };            </script>        </div></div>
+    </div>
+
+    
+    <div class="tables-container">
+        <div class="card table-card">
+            <h2>Table A: Timeline Overview (Nsight Systems)</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Stage</th>
+                        <th>Wall Time (ms)</th>
+                        <th>GPU Active Time (%)</th>
+                        <th>GPU Idle / Gaps (%)</th>
+                        <th>CUDA API Wait (ms)</th>
+                        <th>Prefill Duration (ms)</th>
+                        <th>Decode Step Avg (ms)</th>
+                    </tr>
+                </thead>
+                <tbody>
+        <tr>
+            <td class="stage-cell">stage-0-vllm</td>
+            <td>596.31</td>
+            <td class="highlight-red">19.91%</td>
+            <td>80.09%</td>
+            <td>440.74</td>
+            <td>97.85</td>
+            <td>12.80</td>
+        </tr></tbody>
+            </table>
+        </div>
+
+        <div class="card table-card">
+            <h2>Table B: Kernel Details (Nsight Compute)</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Stage</th>
+                        <th>Kernel Name</th>
+                        <th>Execution Time (us)</th>
+                        <th>DRAM Utilization (%)</th>
+                        <th>Compute Utilization (%)</th>
+                        <th>Active Warps (%)</th>
+                        <th>Registers / Thread</th>
+                        <th>Local Spills (B)</th>
+                        <th>Dominant Bottleneck</th>
+                    </tr>
+                </thead>
+                <tbody>
+            <tr>
+                <td class="stage-cell">stage-0-vllm</td>
+                <td><span class='badge badge-prefill'>Prefill</span> Prefill Fused RMSNorm</td>
+                <td>46.02</td>
+                <td>53.5% <span class="sub">(273.9 GB/s)</span></td>
+                <td>0.5% <span class="sub">(0.45 TFLOP/s)</span></td>
+                <td>91.1%</td>
+                <td>38</td>
+                <td>0</td>
+                <td class="bottleneck">Latency / Issue</td>
+            </tr>
+            <tr>
+                <td class="stage-cell">stage-0-vllm</td>
+                <td><span class='badge badge-prefill'>Prefill</span> Prefill Linear GEMM</td>
+                <td>4142.56</td>
+                <td>5.5% <span class="sub">(28.1 GB/s)</span></td>
+                <td>27.2% <span class="sub">(27.23 TFLOP/s)</span></td>
+                <td>16.6%</td>
+                <td>232</td>
+                <td>0</td>
+                <td class="bottleneck">Low Occupancy / Latency</td>
+            </tr>
+            <tr>
+                <td class="stage-cell">stage-0-vllm</td>
+                <td><span class='badge badge-prefill'>Prefill</span> Prefill RoPE Embedding</td>
+                <td>52.93</td>
+                <td>29.1% <span class="sub">(149.0 GB/s)</span></td>
+                <td>0.3% <span class="sub">(0.26 TFLOP/s)</span></td>
+                <td>64.4%</td>
+                <td>31</td>
+                <td>0</td>
+                <td class="bottleneck">Latency / Issue</td>
+            </tr>
+            <tr>
+                <td class="stage-cell">stage-0-vllm</td>
+                <td><span class='badge badge-prefill'>Prefill</span> Prefill void vllm::reshape_and_cache</td>
+                <td>27.87</td>
+                <td>15.0% <span class="sub">(76.6 GB/s)</span></td>
+                <td>0.1% <span class="sub">(0.07 TFLOP/s)</span></td>
+                <td>44.5%</td>
+                <td>48</td>
+                <td>0</td>
+                <td class="bottleneck">Latency / Issue</td>
+            </tr>
+            <tr>
+                <td class="stage-cell">stage-0-vllm</td>
+                <td><span class='badge badge-prefill'>Prefill</span> Prefill Attention (FlashDecode/SplitKV)</td>
+                <td>737.54</td>
+                <td>2.2% <span class="sub">(11.5 GB/s)</span></td>
+                <td>18.7% <span class="sub">(18.71 TFLOP/s)</span></td>
+                <td>8.3%</td>
+                <td>254</td>
+                <td>0</td>
+                <td class="bottleneck">Low Occupancy / Latency</td>
+            </tr>
+            <tr>
+                <td class="stage-cell">stage-0-vllm</td>
+                <td><span class='badge badge-prefill'>Prefill</span> Prefill SwiGLU Activation</td>
+                <td>243.71</td>
+                <td>67.4% <span class="sub">(345.0 GB/s)</span></td>
+                <td>2.0% <span class="sub">(1.96 TFLOP/s)</span></td>
+                <td>64.9%</td>
+                <td>37</td>
+                <td>0</td>
+                <td class="bottleneck">Latency / Issue</td>
+            </tr>
+            <tr>
+                <td class="stage-cell">stage-0-vllm</td>
+                <td><span class='badge badge-decode'>Decode</span> Decode Fused RMSNorm</td>
+                <td>7.07</td>
+                <td>0.7% <span class="sub">(3.6 GB/s)</span></td>
+                <td>0.0% <span class="sub">(0.00 TFLOP/s)</span></td>
+                <td>49.4%</td>
+                <td>38</td>
+                <td>0</td>
+                <td class="bottleneck">Latency / Issue</td>
+            </tr>
+            <tr>
+                <td class="stage-cell">stage-0-vllm</td>
+                <td><span class='badge badge-decode'>Decode</span> Decode Linear GEMV</td>
+                <td>178.05</td>
+                <td>62.6% <span class="sub">(320.6 GB/s)</span></td>
+                <td>0.3% <span class="sub">(0.32 TFLOP/s)</span></td>
+                <td>24.4%</td>
+                <td>164</td>
+                <td>0</td>
+                <td class="bottleneck">Latency / Issue</td>
+            </tr>
+            <tr>
+                <td class="stage-cell">stage-0-vllm</td>
+                <td><span class='badge badge-decode'>Decode</span> Decode RoPE Embedding</td>
+                <td>7.23</td>
+                <td>0.2% <span class="sub">(1.3 GB/s)</span></td>
+                <td>0.0% <span class="sub">(0.00 TFLOP/s)</span></td>
+                <td>23.4%</td>
+                <td>31</td>
+                <td>0</td>
+                <td class="bottleneck">Latency / Issue</td>
+            </tr>
+            <tr>
+                <td class="stage-cell">stage-0-vllm</td>
+                <td><span class='badge badge-decode'>Decode</span> Decode void vllm::reshape_and_cache</td>
+                <td>8.86</td>
+                <td>0.5% <span class="sub">(2.6 GB/s)</span></td>
+                <td>0.0% <span class="sub">(0.00 TFLOP/s)</span></td>
+                <td>17.3%</td>
+                <td>48</td>
+                <td>0</td>
+                <td class="bottleneck">Low Occupancy / Latency</td>
+            </tr>
+            <tr>
+                <td class="stage-cell">stage-0-vllm</td>
+                <td><span class='badge badge-decode'>Decode</span> Decode Attention (FlashDecode/SplitKV)</td>
+                <td>25.98</td>
+                <td>16.2% <span class="sub">(83.0 GB/s)</span></td>
+                <td>5.5% <span class="sub">(5.53 TFLOP/s)</span></td>
+                <td>9.3%</td>
+                <td>241</td>
+                <td>0</td>
+                <td class="bottleneck">Low Occupancy / Latency</td>
+            </tr>
+            <tr>
+                <td class="stage-cell">stage-0-vllm</td>
+                <td><span class='badge badge-decode'>Decode</span> Decode Attention Combine (Split-K)</td>
+                <td>21.70</td>
+                <td>1.2% <span class="sub">(5.9 GB/s)</span></td>
+                <td>0.0% <span class="sub">(0.00 TFLOP/s)</span></td>
+                <td>8.3%</td>
+                <td>60</td>
+                <td>0</td>
+                <td class="bottleneck">Low Occupancy / Latency</td>
+            </tr>
+            <tr>
+                <td class="stage-cell">stage-0-vllm</td>
+                <td><span class='badge badge-decode'>Decode</span> Decode SwiGLU Activation</td>
+                <td>10.02</td>
+                <td>0.9% <span class="sub">(4.5 GB/s)</span></td>
+                <td>0.0% <span class="sub">(0.02 TFLOP/s)</span></td>
+                <td>53.0%</td>
+                <td>27</td>
+                <td>0</td>
+                <td class="bottleneck">Latency / Issue</td>
+            </tr></tbody>
+            </table>
+        </div>
+    </div>
+    
+</body>
+</html>

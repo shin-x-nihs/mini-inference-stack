@@ -37,7 +37,7 @@ print(f"CTX_PROMPTS={c['num_prompts']}")
 EOF
 )"
 
-# 3. Arguments: ./bench.sh [stage_name] [all|pareto|context]
+# 3. Arguments: ./bench_closed_loop.sh [stage_name] [all|pareto|context]
 STAGE="${1:-stage-0-vllm}"
 MODE="${2:-all}"
 OUT_DIR="benchmarks/results/${STAGE}"

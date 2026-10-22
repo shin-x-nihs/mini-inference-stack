@@ -1,0 +1,1 @@
+Open .ncu-rep and .nsys-rep in official apps for detailed analysis

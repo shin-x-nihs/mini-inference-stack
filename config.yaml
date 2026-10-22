@@ -3,6 +3,18 @@ model:
   dtype: "bfloat16"
   max_model_len: 9216  # 8192 max input + 64 output + chat template headroom
 
+# for speculative decoding
+draft_model:
+  name: "Qwen/Qwen2.5-Coder-0.5B-Instruct"
+  dtype: "bfloat16"
+  max_model_len: 9216
+
+# for showcasing
+quantized_model:
+  name: "Qwen/Qwen2.5-Coder-14B-Instruct-AWQ"
+  dtype: "auto"
+  max_model_len: 9216
+
 server:
   host: "0.0.0.0"
   port: 8000

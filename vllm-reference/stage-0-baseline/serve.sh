@@ -64,7 +64,7 @@ echo "  GPU memory target:   ${GPU_MEMORY_UTILIZATION}"
 echo "  Prefix caching flag: ${PREFIX_CACHE_FLAG}"
 
 NSYS_CMD=()
-if [[ "${NSYS:-0}" == "ON" ]]; then
+if [[ "${NSYS:-0}" == "ON" || "${NSYS:-0}" == "1" ]]; then
     echo "  Profiler mode:       ENABLED (nsys launch dormant session)"
     NSYS_CMD=(nsys launch --trace=cuda,nvtx --cuda-graph-trace=node)
 fi
