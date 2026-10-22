@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+export LC_ALL=C
 
 # 1. Resolve repository root
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -21,7 +22,6 @@ print(f"MODEL_NAME='{m.get('name', 'Qwen/Qwen2.5-Coder-1.5B-Instruct')}'")
 print(f"DTYPE='{m.get('dtype', 'bfloat16')}'")
 print(f"MAX_LEN={m.get('max_model_len', 9216)}")
 print(f"GPU_MEM={cfg.get('server', {}).get('gpu_memory_utilization', 0.70)}")
-# Default L=2048 so KV cache spills out of L2 into DRAM
 print(f"PROF_IN={p.get('ncu_input_len', 2048)}")
 EOF
 )"
@@ -41,14 +41,13 @@ echo "=========================================================="
 echo " Nsight Compute Kernel & Roofline Profiler"
 echo " Target Stage:   ${STAGE}"
 echo " Model:          ${MODEL_NAME} (${DTYPE})"
-echo " Workload:       1 Prefill (L=${PROF_IN}) + 1 Decode Step (C=1)"
+echo " Workload:       Layer 0 | 1 Prefill (L=${PROF_IN}) + 1 Decode Step (C=1)"
 echo " Profile Out:    ${PROF_DIR}"
 echo " Results JSON:   ${METRICS_JSON}"
 echo "=========================================================="
 
-# 3. Create temporary single-process runner that gates profiling to Layer 0 + lm_head
+# 3. Create single-process runner that profiles strictly Layer 0 (Pass 1 = Prefill, Pass 2 = Decode)
 cat << 'EOF' > "${RUNNER_PY}"
-import os
 import sys
 import torch
 from vllm import LLM, SamplingParams
@@ -66,58 +65,49 @@ llm = LLM(
     enable_prefix_caching=False,
 )
 
-# Locate Layer 0 and lm_head so NCU only profiles 1 representative layer instead of all 28
+# Locate Layer 0 inside vLLM model runner
 driver_model = llm.llm_engine.model_executor.driver_worker.model_runner.model
-target_modules = []
+layer0 = None
 for name, mod in driver_model.named_modules():
-    if name.endswith(".layers.0") or name.endswith("lm_head"):
-        target_modules.append((name, mod))
+    if name.endswith(".layers.0") or name == "layers.0":
+        layer0 = mod
+        break
 
-step_Tracker = {"phase": "Prefill"}
+pass_counter = {"count": 0}
 
 def pre_hook(module, args):
-    torch.cuda.nvtx.range_push(f"{step_Tracker['phase']}")
+    phase = "Prefill" if pass_counter["count"] == 0 else "Decode"
+    torch.cuda.nvtx.range_push(phase)
     torch.cuda.cudart().cudaProfilerStart()
 
 def post_hook(module, args, output):
     torch.cuda.cudart().cudaProfilerStop()
     torch.cuda.nvtx.range_pop()
+    pass_counter["count"] += 1
 
-# Warmup pass (unprofiled)
+# Unprofiled warmup
 warmup_params = SamplingParams(temperature=0.0, max_tokens=2, ignore_eos=True)
 llm.generate(["warmup " * 64], warmup_params, use_tqdm=False)
 
-# Attach hooks for surgical Layer 0 + lm_head capture
+# Attach surgical hook to Layer 0
 hooks = []
-for name, mod in target_modules:
-    hooks.append(mod.register_forward_pre_hook(pre_hook))
-    hooks.append(mod.register_forward_hook(post_hook))
-    if name.endswith("lm_head"):
-        # After lm_head finishes in pass 1 (Prefill), switch NVTX tag to Decode for pass 2
-        hooks.append(mod.register_forward_hook(lambda m, a, o: step_Tracker.update({"phase": "Decode"})))
+if layer0 is not None:
+    hooks.append(layer0.register_forward_pre_hook(pre_hook))
+    hooks.append(layer0.register_forward_hook(post_hook))
 
-# Profiled pass: max_tokens=2 runs exactly 1 Prefill step + 1 Decode step
+# Profiled run: max_tokens=2 triggers exactly 1 Prefill pass (count=0) and 1 Decode pass (count=1)
 prompt_token_ids = [100] * in_len
 prof_params = SamplingParams(temperature=0.0, max_tokens=2, ignore_eos=True)
-
-if not target_modules:
-    torch.cuda.cudart().cudaProfilerStart()
 llm.generate([{"prompt_token_ids": prompt_token_ids}], prof_params, use_tqdm=False)
-if not target_modules:
-    torch.cuda.cudart().cudaProfilerStop()
 
 for h in hooks:
     h.remove()
 EOF
 
-# 4. Run Nsight Compute collecting Table B + Roofline (FLOPs & DRAM Bytes) metrics
-METRICS_LIST=(
-    "gpu__time_duration.sum"
+# 4. Run Nsight Compute with --set detailed (enables full GUI Roofline, SOL, Memory & Warp charts)
+# plus explicit FLOP and local memory spill counters for Table B & JSON export
+EXTRA_METRICS=(
     "dram__bytes.sum"
-    "dram__throughput.avg.pct_of_peak_sustained_active"
-    "sm__throughput.avg.pct_of_peak_sustained_active"
-    "sm__warps_active.avg.pct_of_peak_sustained_active"
-    "launch__registers_per_thread"
     "l1tex__m_xbar2l1tex_read_bytes_mem_local.sum"
     "l1tex__m_l1tex2xbar_write_bytes_mem_local.sum"
     "smsp__sass_thread_inst_executed_op_fadd_pred_on.sum"
@@ -128,14 +118,14 @@ METRICS_LIST=(
     "smsp__sass_thread_inst_executed_op_hfma_pred_on.sum"
     "smsp__inst_executed_pipe_tensor.sum"
 )
-IFS=,; METRICS_ARG="${METRICS_LIST[*]}"; unset IFS
+IFS=,; METRICS_ARG="${EXTRA_METRICS[*]}"; unset IFS
 
-echo ">>> [1/3] Running Nsight Compute capture (Layer 0 + lm_head across Prefill & Decode)..."
+echo ">>> [1/3] Running Nsight Compute capture on Layer 0 (Prefill & Decode)..."
 VLLM_ENABLE_V1_MULTIPROCESSING=0 ncu \
     --target-processes all \
     --profile-from-start off \
     --nvtx \
-    -k regex:"gemvx|cutlass.*gemm|flash_fwd|fused_add_rms_norm|mul_silu" \
+    --set detailed \
     --metrics "${METRICS_ARG}" \
     --export "${REP_FILE}" \
     --force-overwrite \
@@ -147,82 +137,118 @@ ncu --import "${REP_FILE}" --csv --page raw > "${CSV_FILE}"
 echo ">>> [3/3] Building Table B and Roofline JSON..."
 uv run python3 - "${CSV_FILE}" "${TABLE_MD}" "${METRICS_JSON}" "${STAGE}" << 'EOF'
 import csv, json, sys
-from collections import defaultdict
 
 csv_path, md_path, json_path, stage = sys.argv[1:5]
 
-# Strip any non-CSV preamble lines emitted by ncu
+# Keep only valid CSV lines starting from the "ID" header
 with open(csv_path, "r", encoding="utf-8") as f:
-    lines = [line for line in f if line.startswith('"ID"') or (line and line[0].isdigit()) or line.startswith('"0"')]
+    raw_lines = f.readlines()
 
-reader = csv.DictReader(lines)
-invocations = defaultdict(dict)
+start_idx = next((i for i, l in enumerate(raw_lines) if l.startswith('"ID"')), None)
+if start_idx is None:
+    raise RuntimeError("Could not find CSV header in NCU export.")
 
-for row in reader:
-    kid = row.get("ID")
-    if not kid:
-        continue
-    inv = invocations[kid]
-    inv["kernel_name"] = row.get("Kernel Name", "unknown")
-    inv["nvtx"] = row.get("NVTX Push/Pop Range", "")
-    m_name = row.get("Metric Name", "")
-    m_val_str = row.get("Metric Value", "0").replace(",", "")
+reader = list(csv.DictReader(raw_lines[start_idx:]))
+if len(reader) < 2:
+    raise RuntimeError("NCU CSV contains no kernel rows.")
+
+units_row = reader[0]  # Row 0 after header holds metric units (e.g., ns, us, ms, byte)
+data_rows = reader[1:]
+
+def get_float(row, key):
+    val = row.get(key, "")
+    if val is None or val == "" or val == "N/A":
+        return 0.0
     try:
-        inv[m_name] = float(m_val_str)
+        return float(str(val).replace(",", ""))
     except ValueError:
-        pass
+        return 0.0
+
+def get_duration_ns(row, units):
+    val = get_float(row, "gpu__time_duration.sum")
+    unit = units.get("gpu__time_duration.sum", "ns").strip()
+    if unit == "ms":
+        return val * 1e6
+    if unit in ("us", "µs", "μs"):
+        return val * 1e3
+    if unit == "s":
+        return val * 1e9
+    return val
 
 def classify_kernel(kname, phase):
     kl = kname.lower()
+    if "splitkv_combine" in kl:
+        return f"{phase} Attention Combine (Split-K)"
     if "flash_fwd_splitkv" in kl:
-        return "Decode Attention (FlashDecode)"
+        return f"{phase} Attention (FlashDecode/SplitKV)"
     if "flash_fwd" in kl:
         return f"{phase} Attention (FlashAttention)"
-    if "gemvx" in kl:
-        return f"{phase} GEMV (cuBLAS)"
-    if "cutlass" in kl and "gemm" in kl:
-        return f"{phase} GEMM (CUTLASS TensorOp)"
+    if "gemv" in kl:
+        return f"{phase} Linear GEMV"
+    if "gemm" in kl or "nvjet" in kl or "cutlass" in kl:
+        return f"{phase} Linear GEMM"
     if "rms_norm" in kl:
-        return f"{phase} Fused Add+RMSNorm"
-    if "silu" in kl:
-        return f"{phase} Fused SwiGLU"
-    return f"{phase} {kname[:30]}"
+        return f"{phase} Fused RMSNorm"
+    if "rope" in kl or "rotary" in kl:
+        return f"{phase} RoPE Embedding"
+    if "silu" in kl or "act_and_mul" in kl:
+        return f"{phase} SwiGLU Activation"
+    return f"{phase} {kname[:28]}"
 
 records = []
 peak_bw_estimates = []
 peak_tflops_estimates = []
 
-for kid, d in invocations.items():
-    dur_ns = d.get("gpu__time_duration.sum", 0.0)
+total_rows = len(data_rows)
+for idx, row in enumerate(data_rows):
+    dur_ns = get_duration_ns(row, units_row)
     if dur_ns <= 0:
         continue
 
-    nvtx_txt = d.get("nvtx", "")
-    phase = "Decode" if "Decode" in nvtx_txt or "gemvx" in d["kernel_name"].lower() or "splitkv" in d["kernel_name"].lower() else "Prefill"
-    label = classify_kernel(d["kernel_name"], phase)
+    kname = row.get("Kernel Name", "unknown")
+    nvtx_txt = row.get("NVTX Push/Pop Range", "")
+    grid_str = row.get("Grid Size", "")
 
-    dram_bytes = d.get("dram__bytes.sum", 0.0)
-    dram_pct = d.get("dram__throughput.avg.pct_of_peak_sustained_active", 0.0)
-    sm_pct = d.get("sm__throughput.avg.pct_of_peak_sustained_active", 0.0)
-    warps_pct = d.get("sm__warps_active.avg.pct_of_peak_sustained_active", 0.0)
-    regs = int(d.get("launch__registers_per_thread", 0))
+    # Determine phase via NVTX tag, or fallback to launch order / grid size
+    if "Decode" in nvtx_txt:
+        phase = "Decode"
+    elif "Prefill" in nvtx_txt:
+        phase = "Prefill"
+    else:
+        phase = "Prefill" if idx < (total_rows // 2) else "Decode"
+
+    label = classify_kernel(kname, phase)
+
+    dram_bytes = get_float(row, "dram__bytes.sum")
+    # Convert DRAM unit if reported in KB/MB/GB
+    dram_unit = units_row.get("dram__bytes.sum", "byte").lower()
+    if "gbyte" in dram_unit or dram_unit == "gb":
+        dram_bytes *= 1e9
+    elif "mbyte" in dram_unit or dram_unit == "mb":
+        dram_bytes *= 1e6
+    elif "kbyte" in dram_unit or dram_unit == "kb":
+        dram_bytes *= 1e3
+
+    dram_pct = get_float(row, "dram__throughput.avg.pct_of_peak_sustained_active")
+    sm_pct = get_float(row, "sm__throughput.avg.pct_of_peak_sustained_active")
+    warps_pct = get_float(row, "sm__warps_active.avg.pct_of_peak_sustained_active")
+    regs = int(get_float(row, "launch__registers_per_thread"))
     spills = int(
-        d.get("l1tex__m_xbar2l1tex_read_bytes_mem_local.sum", 0.0) +
-        d.get("l1tex__m_l1tex2xbar_write_bytes_mem_local.sum", 0.0)
+        get_float(row, "l1tex__m_xbar2l1tex_read_bytes_mem_local.sum") +
+        get_float(row, "l1tex__m_l1tex2xbar_write_bytes_mem_local.sum")
     )
 
-    # Compute Total FLOPs (CUDA Core FP32/FP16 + Tensor Core HMMA s16816 = 4096 FLOPs/inst)
     fp32_flops = (
-        d.get("smsp__sass_thread_inst_executed_op_fadd_pred_on.sum", 0.0) +
-        d.get("smsp__sass_thread_inst_executed_op_fmul_pred_on.sum", 0.0) +
-        2.0 * d.get("smsp__sass_thread_inst_executed_op_ffma_pred_on.sum", 0.0)
+        get_float(row, "smsp__sass_thread_inst_executed_op_fadd_pred_on.sum") +
+        get_float(row, "smsp__sass_thread_inst_executed_op_fmul_pred_on.sum") +
+        2.0 * get_float(row, "smsp__sass_thread_inst_executed_op_ffma_pred_on.sum")
     )
     fp16_flops = (
-        d.get("smsp__sass_thread_inst_executed_op_hadd_pred_on.sum", 0.0) +
-        d.get("smsp__sass_thread_inst_executed_op_hmul_pred_on.sum", 0.0) +
-        2.0 * d.get("smsp__sass_thread_inst_executed_op_hfma_pred_on.sum", 0.0)
+        get_float(row, "smsp__sass_thread_inst_executed_op_hadd_pred_on.sum") +
+        get_float(row, "smsp__sass_thread_inst_executed_op_hmul_pred_on.sum") +
+        2.0 * get_float(row, "smsp__sass_thread_inst_executed_op_hfma_pred_on.sum")
     )
-    tensor_flops = d.get("smsp__inst_executed_pipe_tensor.sum", 0.0) * 4096.0
+    tensor_flops = get_float(row, "smsp__inst_executed_pipe_tensor.sum") * 4096.0
     total_flops = fp32_flops + fp16_flops + tensor_flops
 
     dur_s = dur_ns * 1e-9
@@ -231,24 +257,27 @@ for kid, d in invocations.items():
     ai = (total_flops / dram_bytes) if dram_bytes > 0 else 0.0
     tflops = (total_flops / (dur_s * 1e12)) if dur_s > 0 else 0.0
 
-    if dram_pct > 20.0:
+    if dram_pct > 20.0 and achieved_bw_gbps > 0:
         peak_bw_estimates.append(achieved_bw_gbps / (dram_pct / 100.0))
     if sm_pct > 20.0 and tensor_flops > 0:
         peak_tflops_estimates.append(tflops / (sm_pct / 100.0))
 
-    if dram_pct >= sm_pct and dram_pct >= 40.0:
+    if dram_pct >= sm_pct and dram_pct >= 35.0:
         bound = "Memory Bandwidth"
-    elif sm_pct > dram_pct and sm_pct >= 40.0:
+    elif sm_pct > dram_pct and sm_pct >= 35.0:
         bound = "Compute Pipeline"
-    elif warps_pct < 25.0:
+    elif warps_pct < 20.0:
         bound = "Low Occupancy / Latency"
     else:
         bound = "Latency / Issue"
 
     records.append({
+        "id": int(row.get("ID", idx)),
         "label": label,
         "phase": phase,
-        "raw_kernel_name": d["kernel_name"],
+        "raw_kernel_name": kname,
+        "grid_size": grid_str,
+        " block_size": row.get("Block Size", ""),
         "execution_time_us": round(dur_us, 2),
         "dram_utilization_pct": round(dram_pct, 2),
         "compute_utilization_pct": round(sm_pct, 2),
@@ -261,7 +290,7 @@ for kid, d in invocations.items():
         "achieved_dram_gbps": round(achieved_bw_gbps, 2),
     })
 
-# Deduplicate by label (keep representative invocation with highest duration per category)
+# Deduplicate by label (keep highest duration invocation per kernel role)
 dedup = {}
 for r in records:
     lbl = r["label"]
@@ -283,14 +312,14 @@ with open(json_path, "w", encoding="utf-8") as f:
     json.dump(payload, f, indent=2)
 
 md_lines = [
-    "### Table B: Kernel Details (Nsight Compute)",
+    "### Table B: Kernel Details (Nsight Compute - Layer 0)",
     "",
-    "| Kernel Category | Time (us) | DRAM (%) | Compute (%) | Active Warps (%) | Regs | Spills (B) | AI (FLOP/B) | TFLOP/s | Dominant Bottleneck |",
-    "| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :--- |"
+    "| Kernel Role | Grid Size | Time (us) | DRAM (%) | Compute (%) | Active Warps (%) | Regs | Spills (B) | AI (FLOP/B) | TFLOP/s | Dominant Bottleneck |",
+    "| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :--- |"
 ]
 for k in final_kernels:
     md_lines.append(
-        f"| **{k['label']}** | {k['execution_time_us']} | {k['dram_utilization_pct']}% | "
+        f"| **{k['label']}** | `{k['grid_size']}` | {k['execution_time_us']} | {k['dram_utilization_pct']}% | "
         f"{k['compute_utilization_pct']}% | {k['active_warps_pct']}% | {k['registers_per_thread']} | "
         f"{k['local_spills_bytes']} | {k['arithmetic_intensity_flop_byte']} | {k['attained_tflops']} | {k['dominant_bottleneck']} |"
     )
