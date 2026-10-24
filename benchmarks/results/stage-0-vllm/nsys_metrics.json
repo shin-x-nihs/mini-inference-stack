@@ -1,9 +1,9 @@
 {
-  "wall_time_ms": 547.44,
-  "gpu_active_pct": 81.3,
-  "gpu_idle_pct": 18.7,
-  "cuda_sync_wait_ms": 389.01,
-  "prefill_duration_ms": 83.31,
-  "decode_step_avg_ms": 11.81,
+  "wall_time_ms": 540.91,
+  "gpu_active_pct": 83.31,
+  "gpu_idle_pct": 16.69,
+  "cuda_sync_wait_ms": 401.21,
+  "prefill_duration_ms": 89.71,
+  "decode_step_avg_ms": 11.65,
   "phase_measurement_source": "Client Stream Fallback"
 }

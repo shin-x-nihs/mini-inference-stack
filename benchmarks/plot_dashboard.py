@@ -84,24 +84,38 @@ def load_stage_data(stage_dir: Path) -> dict:
 
 def base_layout(title: str, xaxis_title: str, yaxis_title: str) -> dict:
     return dict(
-        title=dict(text=title, font=dict(size=17, color=TEXT_MAIN, family="Inter, sans-serif"), x=0.02),
+        title=dict(
+            text=title,
+            font=dict(size=17, color=TEXT_MAIN, family="Inter, sans-serif"),
+            x=0.01,
+            y=0.96,
+        ),
         paper_bgcolor=BG_CARD,
         plot_bgcolor=BG_CARD,
         font=dict(color=TEXT_MUTED, family="Inter, monospace", size=12),
-        margin=dict(l=60, r=30, t=65, b=55),
-        height=420,
+        margin=dict(l=60, r=30, t=82, b=55),
+        height=435,
         hovermode="closest",
         legend=dict(
-            orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1.0,
-            bgcolor="rgba(0,0,0,0)", font=dict(color=TEXT_MAIN, size=11)
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="left",
+            x=0.0,
+            bgcolor="rgba(0,0,0,0)",
+            font=dict(color=TEXT_MAIN, size=11),
         ),
         xaxis=dict(
             title=dict(text=xaxis_title, font=dict(color=TEXT_MAIN)),
-            gridcolor=GRID_COLOR, zerolinecolor=GRID_COLOR, linecolor="#333333"
+            gridcolor=GRID_COLOR,
+            zerolinecolor=GRID_COLOR,
+            linecolor="#333333",
         ),
         yaxis=dict(
             title=dict(text=yaxis_title, font=dict(color=TEXT_MAIN)),
-            gridcolor=GRID_COLOR, zerolinecolor=GRID_COLOR, linecolor="#333333"
+            gridcolor=GRID_COLOR,
+            zerolinecolor=GRID_COLOR,
+            linecolor="#333333",
         ),
     )
 
@@ -110,8 +124,10 @@ def dropdown_style() -> dict:
     return dict(
         type="dropdown",
         direction="down",
-        x=1.0, y=1.18,
-        xanchor="right", yanchor="top",
+        x=1.0,
+        y=1.11,
+        xanchor="right",
+        yanchor="top",
         bgcolor="#1a1a1a",
         bordercolor="#ff2a2a",
         borderwidth=1,
@@ -417,7 +433,11 @@ def generate_dashboard(stages: list[dict], output_path: Path):
     f3 = build_plot3_decode(stages)
     f4 = build_plot4_roofline(stages)
 
-    cfg = {"responsive": True, "displaylogo": False}
+    cfg = {
+        "responsive": True,
+        "displaylogo": False,
+        "modeBarButtonsToRemove": ["select2d", "lasso2d"],
+    }
     p1_html = f1.to_html(full_html=False, include_plotlyjs=False, config=cfg)
     p2_html = f2.to_html(full_html=False, include_plotlyjs=False, config=cfg)
     p3_html = f3.to_html(full_html=False, include_plotlyjs=False, config=cfg)
@@ -472,6 +492,44 @@ def generate_dashboard(stages: list[dict], output_path: Path):
             border-radius: 4px;
             padding: 12px;
         }}
+
+        /* --- Fix 1: Dropdown menu dark-grey hover & active state --- */
+        .js-plotly-plot .plotly .updatemenu-item-rect {{
+            fill: #1a1a1a !important;
+            stroke: #333333 !important;
+            transition: fill 0.12s ease;
+        }}
+        .js-plotly-plot .plotly .updatemenu-header-group .updatemenu-item-rect {{
+            stroke: #ff2a2a !important;
+        }}
+        .js-plotly-plot .plotly .updatemenu-button:hover .updatemenu-item-rect,
+        .js-plotly-plot .plotly .updatemenu-dropdown-button:hover .updatemenu-item-rect,
+        .js-plotly-plot .plotly .updatemenu-item-rect:hover {{
+            fill: #2e2e2e !important;
+            stroke: #ff2a2a !important;
+        }}
+        .js-plotly-plot .plotly .updatemenu-item-text {{
+            fill: #ffffff !important;
+        }}
+        .js-plotly-plot .plotly .updatemenu-header-arrow {{
+            fill: #ff2a2a !important;
+        }}
+
+        /* --- Fix 2: Pin modebar cleanly at top-right above dropdown --- */
+        .js-plotly-plot .plotly .modebar {{
+            top: 2px !important;
+            right: 6px !important;
+            background: rgba(18, 18, 18, 0.9) !important;
+            border-radius: 4px;
+            padding: 2px 4px;
+        }}
+        .js-plotly-plot .plotly .modebar-btn path {{
+            fill: #888888 !important;
+        }}
+        .js-plotly-plot .plotly .modebar-btn:hover path {{
+            fill: #ff2a2a !important;
+        }}
+
         .tables-container {{
             display: flex;
             flex-direction: column;
