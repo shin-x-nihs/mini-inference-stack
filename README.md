@@ -22,7 +22,7 @@
 This project explores how LLM inference works and how GPU optimizations affect its performance, using `Qwen2.5-Coder-1.5B-Instruct` on an NVIDIA GeForce RTX 5080 Laptop GPU.
 
 The codebase is organized into **two parallel folds**:
-* **`vllm-reference/` (Reference Track):** Production-grade vLLM baseline used to establish upper-bound performance targets, latency boundaries, and reference profiler traces.
+* **`vllm-reference/` (Reference Track):** Production-grade vLLM implementations used to establish upper-bound performance targets, latency boundaries, and reference profiler traces.
 * **`custom-serving/` (Custom Track):** Progressive, from-scratch inference implementations starting from `stage-0-baseline` (minimal naive PyTorch) through custom kernels and memory managers, built to demystify GPU performance from first principles.
 
 The goal isn't to build a replacement for vLLM. It's to learn by experimenting: measure the baseline, find out where execution time is spent, implement optimizations one step at a time, and compare the results.
@@ -30,6 +30,7 @@ The goal isn't to build a replacement for vLLM. It's to learn by experimenting: 
 Client benchmarks measure response times and throughput. NVIDIA Nsight Systems (`nsys`) and Nsight Compute (`ncu`) help investigate what's happening inside the CPU and GPU.
 
 **[Explore the interactive benchmark dashboard ↗](https://shin-x-nihs.github.io/mini-inference-stack/)**.
+
 ---
 
 ## What I Want to Learn
@@ -37,8 +38,8 @@ Client benchmarks measure response times and throughput. NVIDIA Nsight Systems (
 * **Measure a baseline:** Find out how quickly the model responds and how much output it can generate under different workloads.
 * **Understand generation:** Follow a request from processing the input prompt to generating tokens one by one.
 * **Find bottlenecks:** Use profiling tools to understand whether performance is limited by GPU computation, memory access, GPU utilization, or CPU overhead.
-* **Try GPU optimizations:** Explore techniques such as KV caching, tiled attention, and operator fusion, and measure whether they improve performance.
-* **Compare fairly:** Keep the model, precision, prompts, token lengths, and hardware settings consistent across experiments.
+* **Try GPU optimizations:** Explore techniques such as KV caching, tiled attention, operator fusion, and speculative decoding, and measure whether they improve performance.
+* **Compare fairly:** Keep the model, precision, prompts, token lengths, and hardware settings consistent across experiments. Common workload defaults live in `config.yaml` to keep test conditions consistent across runner scripts.
 
 ---
 
@@ -55,7 +56,8 @@ All benchmarks and profiling runs use the same setup:
 | **Python** | Python 3.12 (managed with `uv`) |
 | **PyTorch** | PyTorch 2.13.0+cu130 |
 | **Reference Engine** | vLLM 0.31.0 |
-| **Model** | `Qwen/Qwen2.5-Coder-1.5B-Instruct` (`bfloat16`) |
+| **Target Model** | `Qwen/Qwen2.5-Coder-1.5B-Instruct` (`bfloat16`) |
+| **Draft Model** | `Qwen/Qwen2.5-Coder-0.5B-Instruct` (`bfloat16`, for speculative decoding) |
 | **Profilers** | NVIDIA Nsight Systems (`nsys`) and Nsight Compute (`ncu`) |
 
 The 1.5B model is small enough to run, profile, and iterate on quickly on a laptop GPU.
@@ -68,9 +70,11 @@ The 1.5B model is small enough to run, profile, and iterate on quickly on a lapt
 mini-inference-stack/
 ├── config.yaml                     # Model, server, and benchmark settings
 ├── WORKFLOW.md                     # Engineering guide for benchmarks and profiling
+├── REPORTS.md                      # Experiments, observations, hypotheses, and conclusions
 ├── ui/                             # Chainlit web UI for quick sanity checks
-├── vllm-reference/                 # Reference track: vLLM baseline implementations
-│   └── stage-0-baseline/           # vLLM baseline server (Stage 0)
+├── vllm-reference/                 # Reference track: vLLM reference implementations
+│   ├── stage-0-baseline/           # vLLM baseline server (Stage 0)
+│   └── stage-1-spec-dec/           # vLLM speculative decoding server (Stage 1)
 ├── custom-serving/                 # Custom track: from-scratch inference engines
 │   └── stage-0-baseline/           # Minimal PyTorch baseline server
 └── benchmarks/                     # Benchmark and profiling suite
@@ -130,7 +134,11 @@ See [WORKFLOW.md](WORKFLOW.md) for full details on running experiments.
 In Terminal 1:
 
 ```bash
+# Reference Track Stage 0: Baseline
 ./vllm-reference/stage-0-baseline/serve.sh
+
+# Or Reference Track Stage 1: Speculative Decoding
+./vllm-reference/stage-1-spec-dec/serve.sh
 ```
 
 ### 2. Run Benchmarks
@@ -140,6 +148,8 @@ In Terminal 2 (while the server is running):
 ```bash
 # Run both concurrency and context-length sweeps (closed loop)
 ./benchmarks/bench_closed_loop.sh stage-0-vllm
+# Or for Stage 1:
+./benchmarks/bench_closed_loop.sh stage-1-vllm
 ```
 
 > *Note: For open-loop arrival rate experiments (evaluating queue buildup under offered load), see `./benchmarks/bench_open_loop(temporary).sh`.*
@@ -147,11 +157,13 @@ In Terminal 2 (while the server is running):
 ### 3. Profile GPU Execution
 
 ```bash
-# Timeline profile (start server with: NSYS=ON ./vllm-reference/stage-0-baseline/serve.sh)
+# Timeline profile (start server with: NSYS=ON ./<track>/<stage>/serve.sh)
 ./benchmarks/profile_nsys.sh stage-0-vllm
+./benchmarks/profile_nsys.sh stage-1-vllm
 
-# Kernel profile (runs standalone; stop the server first)
+# Kernel profile (runs standalone; stop the server first to avoid GPU memory contention)
 ./benchmarks/profile_ncu.sh stage-0-vllm
+./benchmarks/profile_ncu.sh stage-1-vllm
 ```
 
 ### 4. Generate the Dashboard
@@ -161,29 +173,34 @@ In Terminal 2 (while the server is running):
 uv run python benchmarks/plot_dashboard.py
 
 # Compare specific stages
-uv run python benchmarks/plot_dashboard.py --stages stage-0-vllm stage-1-naive -o comparison.html
+uv run python benchmarks/plot_dashboard.py --stages stage-0-vllm stage-1-vllm -o comparison.html
 ```
 
 ---
 
 ## Optimization Roadmap
 
-Each stage explores one main change at a time, checks that the implementation produces correct outputs, and measures its performance:
+Each stage explores one main question at a time, checks that the implementation produces correct outputs, and measures its performance:
 
-1. **Stage 0: vLLM Reference Baseline**  
-   Measure serving performance and use profiling tools to understand how the reference implementation runs.
-2. **Stage 1: Minimal Python/PyTorch Inference (Planned)**  
-   Build a simple forward pass and generation loop to understand the model's operations, memory use, and CPU overhead.
-3. **Stage 2: KV Caching (Planned)**  
-   Reuse attention keys and values from previous tokens instead of recomputing them at every generation step. Measure the effects on memory use and generation speed.
-4. **Stage 3: Tiled Prefill Attention (FlashAttention-style) (Planned)**  
-   Explore how processing attention in smaller tiles can reduce intermediate data written to GPU memory.
-5. **Stage 4: Parallel Decode Attention (Split-K / FlashDecode-style) (Planned)**  
-   Explore how splitting attention work across more GPU thread blocks can improve utilization during token generation.
-6. **Stage 5: Paged KV Cache (PagedAttention-style) (Planned)**  
-   Explore storing the KV cache in blocks to manage GPU memory more flexibly as requests come and go.
-7. **Stage 6: Operator Fusion (Planned)**  
-   Combine selected operations to reduce unnecessary memory traffic and GPU kernel launches.
+### Reference Track (vLLM)
+1. **vLLM Stage 0: Reference Baseline (`stage-0-vllm`)**  
+   Measure baseline serving performance and use profiling tools to understand how the reference implementation runs.
+2. **vLLM Stage 1: Speculative Decoding (`stage-1-vllm`)**  
+   Pair a 1.5B target model with a smaller 0.5B draft model to test whether speculative decoding improves generation speed. The results show how acceptance rate, drafting overhead, and concurrency affect performance. See [REPORTS.md](REPORTS.md) for the hypothesis and measurements.
+
+### Custom Track (From Scratch)
+3. **Custom Stage 0: Minimal PyTorch Baseline (`stage-0-custom`)**  
+   Build a simple forward pass and generation loop to understand the model's operations, memory use, and CPU overhead from first principles.
+4. **Custom Stage 1: KV Caching (Planned)**  
+   Measure the cost of recomputing attention keys and values, then test how caching changes generation speed.
+5. **Custom Stage 2: Tiled Attention (FlashAttention-style) (Planned)**  
+   Investigate how tiling reduces intermediate memory traffic during prefill.
+6. **Custom Stage 3: Parallel Decode Attention (Split-K / FlashDecode-style) (Planned)**  
+   Test whether splitting attention work across more thread blocks improves GPU utilization during token generation.
+7. **Custom Stage 4: Paged KV Cache (PagedAttention-style) (Planned)**  
+   Explore storing the KV cache in non-contiguous blocks to manage GPU memory more flexibly as requests arrive and finish.
+8. **Custom Stage 5: Operator Fusion (Planned)**  
+   Measure the effect of combining operations on kernel-launch overhead and memory traffic.
 
 These are learning experiments, not guaranteed improvements. Each optimization is evaluated by measuring its results and understanding its trade-offs.
 
@@ -193,13 +210,13 @@ These are learning experiments, not guaranteed improvements. Each optimization i
 
 | Component | Status | Deliverables |
 | :--- | :---: | :--- |
-| **Environment setup** | Completed | WSL2 Ubuntu 24.04, CUDA 13.1, PyTorch on RTX 5080 |
-| **Stage 0: vLLM baseline** | Completed | Server script, benchmark runs, `nsys` and `ncu` profiles |
-| **Benchmark scripts** | Completed | Closed-loop sweeps (`bench_closed_loop.sh`), open-loop prototype |
-| **Profiling scripts** | Completed | `profile_nsys.sh` and `profile_ncu.sh` |
-| **Comparison dashboard** | Completed | Interactive Plotly HTML report (`benchmarks/plot_dashboard.py`) |
-| **Stage 1: Basic PyTorch engine** | Planned | Simple forward pass and generation loop |
-| **Stages 2–6: GPU optimizations** | Planned | KV cache, tiled attention, Split-K decode, fused ops |
+| **Environment setup** | Tested | WSL2 Ubuntu 24.04, CUDA 13.1, PyTorch on RTX 5080 |
+| **vLLM Stage 0: Reference baseline** | Tested | Server script, benchmark runs, `nsys` and `ncu` profiles |
+| **vLLM Stage 1: Speculative decoding** | Tested | Server script, benchmark sweeps, NCU verification profiling |
+| **Benchmark & profiling suite** | Tested | `bench_closed_loop.sh`, `profile_nsys.sh`, `profile_ncu.sh` |
+| **Comparison dashboard** | Implemented | Interactive Plotly HTML report (`benchmarks/plot_dashboard.py`) |
+| **Custom Stage 0: Naive PyTorch** | Implemented | Minimal PyTorch baseline server (`custom-serving/stage-0-baseline/`) |
+| **Custom Stages 1–5: Optimizations** | Planned | KV cache, tiled attention, split-K decode, paged KV, operator fusion |
 
 ---
 

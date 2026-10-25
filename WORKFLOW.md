@@ -1,7 +1,7 @@
 # Engineering Workflow
 
 A shared guide for running the inference server, checking functionality, benchmarking workloads, profiling GPU behavior, and comparing optimization stages across both project tracks:
-* **Reference track (`vllm-reference/`):** Production vLLM baseline implementations (`stage-0-baseline`).
+* **Reference track (`vllm-reference/`):** vLLM reference implementations (`stage-0-baseline`, `stage-1-spec-dec`).
 * **Custom track (`custom-serving/`):** Progressive from-scratch implementations starting from `stage-0-baseline` through custom kernels and memory layouts.
 
 > **Core Principle:** Keep experiments repeatable—change one variable at a time and record the environment and settings.
@@ -16,7 +16,7 @@ A shared guide for running the inference server, checking functionality, benchma
 | **2. Check** | Keep the server running | UI or quick API probe | Verifies requests and streaming work | Functional verification |
 | **3. Benchmark** | Keep the server running | `./benchmarks/bench_closed_loop.sh <stage-name>` | Measures throughput and latency under standard workloads | Raw JSON in `benchmarks/results/<stage-name>/` |
 | **4a. Profile (`nsys`)** | Restart in profiler-ready mode | `./benchmarks/profile_nsys.sh <stage-name>` | Shows where time is spent across CPU, CUDA, and GPU activity | `.nsys-rep`, `.sqlite`, `nsys_stats.txt`, `nsys_metrics.json` |
-| **4b. Profile (`ncu`)** | Stop the server if using standalone replay | `./benchmarks/profile_ncu.sh <stage-name>` | Examines selected kernels and hardware behavior | `.ncu-rep` and `ncu_metrics.json` (Roofline data) |
+| **4b. Profile (`ncu`)** | Stop the server to avoid GPU memory contention | `./benchmarks/profile_ncu.sh <stage-name>` | Examines selected kernels and hardware behavior | `.ncu-rep` and `ncu_metrics.json` (Roofline data) |
 | **5. Plot** | — | `uv run python benchmarks/plot_dashboard.py` | Compares benchmark and profiler results | `benchmarks/results/dashboard.html` |
 | **6. Record** | — | Save notes and commit relevant files | Preserves the setup, measurements, and conclusions | Reproducible experiment record |
 
@@ -26,7 +26,7 @@ A shared guide for running the inference server, checking functionality, benchma
 
 ## 1. Start the Server
 
-Configuration lives in the root `config.yaml`. The reference server reads these settings and supports environment overrides where implemented. Check the configuration and launch script before each experiment, especially when switching implementations.
+Configuration lives in the root `config.yaml`. Benchmark and runner scripts use these shared defaults where supported. Check each stage's launch script and overrides before an experiment, and record any differences that could affect the results.
 
 ### Key Configuration Settings
 
@@ -34,11 +34,13 @@ Configuration lives in the root `config.yaml`. The reference server reads these 
 | :--- | :--- | :--- |
 | **Target model** (`model.name`) | `Qwen/Qwen2.5-Coder-1.5B-Instruct` | Keeps the reference workload fixed |
 | **Draft model** (`draft_model.name`) | `Qwen/Qwen2.5-Coder-0.5B-Instruct` | For speculative decoding experiments; not required for the baseline |
-| **Quantized model** (`quantized_model.name`) | `Qwen/Qwen2.5-Coder-14B-Instruct-AWQ` | For quantization experiments; not required for the baseline |
+| **Quantized model** (`quantized_model.name`) | `Qwen/Qwen2.5-Coder-14B-Instruct-AWQ` | Reference target for future quantization experiments |
 | `server.host` | `0.0.0.0` | Interface the server listens on |
 | `server.port` | `8000` | API port |
 | `server.gpu_memory_utilization` | `0.70` | Serving-engine VRAM allocation target, not exact physical usage |
 | `server.enable_prefix_caching` | `false` | Controls prefix caching when supported |
+| `benchmarks.prompt` | Fixed Python code prompt | Fixed code prompt used to construct benchmark inputs |
+| `benchmarks.temperature` | `0.0` | 0.0 for greedy sampling where supported |
 | `benchmarks.input_len` | `1024` tokens | Input workload length |
 | `benchmarks.output_len` | `256` tokens | Output workload length |
 | `benchmarks.random_seed` | `42` | Makes randomized workload generation more repeatable |
@@ -52,19 +54,25 @@ The table above summarizes shared settings; the actual `config.yaml` may contain
 | `benchmarks.pareto` | `512` input / `128` output | Fixed workload for concurrency scaling |
 | `benchmarks.context_sweep` | `[128, 256, 512, 1024, 2048, 4096, 8192]` input; `64` output | Measures context scaling at concurrency 1 |
 
-> **Note on Repeatability:** A fixed random seed improves repeatability but does not guarantee identical outputs or timings across implementations. Check that requested input and output lengths are actually used.
+> **Note on Repeatability:** A fixed random seed and greedy temperature improve repeatability but do not guarantee identical timings across runs or implementations. Check that requested input and output lengths are actually used.
 
 ### Standard Launch
 
 In **Terminal 1**:
 
 ```bash
+# Reference Track Stage 0: Baseline
 ./vllm-reference/stage-0-baseline/serve.sh
+
+# Or Reference Track Stage 1: Speculative Decoding
+./vllm-reference/stage-1-spec-dec/serve.sh
 ```
 
 Wait until the model has loaded and the server reports readiness. The reference API is available at `http://127.0.0.1:8000/v1`.
 
 For another implementation, start its documented server script. Keep the API interface and port consistent where practical so the same client and benchmark harness can be reused.
+
+> **Note on Stage Names:** Server directories are named by path (`vllm-reference/stage-0-baseline/`, `vllm-reference/stage-1-spec-dec/`, `custom-serving/stage-0-baseline/`), while runner and benchmark scripts take stage identifiers (`stage-0-vllm`, `stage-1-vllm`, `stage-0-custom`, `stage-1-custom`), which directly name the result folders under `benchmarks/results/<stage-name>/`.
 
 ### Profiler-Ready Launch (Nsight Systems)
 
@@ -72,6 +80,8 @@ To capture serving activity without including model startup, launch the referenc
 
 ```bash
 NSYS=ON ./vllm-reference/stage-0-baseline/serve.sh
+# or for Stage 1:
+NSYS=ON ./vllm-reference/stage-1-spec-dec/serve.sh
 ```
 
 *Use this only if the implementation's launch script supports the `NSYS` option.*
@@ -113,7 +123,9 @@ Open `http://localhost:8501`, submit a short prompt, and verify that:
 For the current reference model, a short request can be sent directly to the API:
 
 ```bash
-curl -s http://127.0.0.1:8000/v1/chat/completions -H "Content-Type: application/json" -d '{"model":"Qwen/Qwen2.5-Coder-1.5B-Instruct","messages":[{"role":"user","content":"Hi"}],"max_tokens":16}'
+curl -s http://127.0.0.1:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model":"Qwen/Qwen2.5-Coder-1.5B-Instruct","messages":[{"role":"user","content":"Hi"}],"max_tokens":16}'
 ```
 
 For another engine, use its served model name and compatible request format. A successful response verifies basic functionality, not performance.
@@ -129,19 +141,16 @@ Benchmarks require an active server. Run one sweep at a time, stop the UI, avoid
 In **Terminal 2**:
 
 ```bash
-./benchmarks/bench_closed_loop.sh <stage-name>
-```
-
-For the current reference baseline, use:
-
-```bash
+# Benchmark Reference Stage 0
 ./benchmarks/bench_closed_loop.sh stage-0-vllm
+
+# Benchmark Reference Stage 1
+./benchmarks/bench_closed_loop.sh stage-1-vllm
 ```
 
 The standard closed-loop script runs two sweeps:
-
-1. **Concurrency sweep:** Uses a 512-token prompt and 128 generated tokens across `C = {1, 2, 4, 8, 16, 32, 64}`. This shows how aggregate throughput and latency change as more requests are active, and helps identify saturation.
-2. **Context-length sweep:** Uses `C = 1`, prompt lengths `[128, 256, 512, 1024, 2048, 4096, 8192]`, and 64 generated tokens. This shows how prompt processing and generation change as the initial context grows.
+1. **Concurrency sweep:** Uses a fixed prompt from `config.yaml`, tokenized and adjusted to the requested input length (512 prompt tokens, 128 generated tokens) across concurrency levels `C = {1, 2, 4, 8, 16, 32, 64}`. This shows how aggregate throughput and latency change as more requests run concurrently, and helps identify saturation.
+2. **Context-length sweep:** Uses concurrency $C = 1$, prompt lengths `[128, 256, 512, 1024, 2048, 4096, 8192]`, and 64 generated tokens. This shows how prompt processing and generation latency change as the initial context grows.
 
 ### Run One Sweep at a Time
 
@@ -157,13 +166,15 @@ When iterating on a specific optimization:
 
 Use the stage name to keep outputs separate. Results are stored under `benchmarks/results/<stage-name>/`.
 
-### Open-Loop Arrival Rate Testing (Experimental Strain)
+### Open-Loop Load Testing (Experimental)
 
 While closed-loop sweeps measure capacity by keeping client concurrency fixed, open-loop benchmarks test behavior under varying offered loads (Poisson/QPS arrival rates):
+
 ```bash
 ./benchmarks/bench_open_loop\(temporary\).sh <stage-name>
 ```
-This strain explores queue buildup, scheduling stalls, and tail-latency degradation when requests arrive independently of response completions.
+
+This tests queue buildup, scheduling stalls, and tail-latency degradation when requests arrive independently of response completions.
 
 ### Keep Comparisons Fair
 
@@ -189,13 +200,15 @@ Nsight Systems captures the overall timeline: CPU activity, CUDA calls, GPU kern
 * **Terminal 1:** Start the reference server in profiler-ready mode:
   ```bash
   NSYS=ON ./vllm-reference/stage-0-baseline/serve.sh
+  # or for Stage 1:
+  NSYS=ON ./vllm-reference/stage-1-spec-dec/serve.sh
   ```
 * **Terminal 2:** Run the profile:
   ```bash
-  ./benchmarks/profile_nsys.sh <stage-name>
+  ./benchmarks/profile_nsys.sh stage-0-vllm
+  # or for Stage 1:
+  ./benchmarks/profile_nsys.sh stage-1-vllm
   ```
-
-For the reference baseline, use `stage-0-vllm` as the stage name. For another engine, use its compatible launch/profile procedure.
 
 **Outputs:**
 - `timeline.nsys-rep` (in `benchmarks/profiles/<stage-name>/`) — Full trace for the Nsight Systems GUI.
@@ -216,13 +229,19 @@ For the reference baseline, use `stage-0-vllm` as the stage name. For another en
 
 Nsight Compute examines selected kernels in more detail, including execution time, memory traffic, compute activity, occupancy indicators, register use, and local-memory spills. It helps investigate a bottleneck identified by benchmarking or the timeline.
 
-* **Terminal 1:** Stop the HTTP server if the profiling script uses standalone replay.
+* **Terminal 1:** Stop the HTTP server before running NCU if the profiling script launches a standalone model instance. This avoids GPU memory contention.
 * **Terminal 2:** Run the kernel profiler:
   ```bash
-  ./benchmarks/profile_ncu.sh <stage-name>
+  # Reference track (vLLM)
+  ./benchmarks/profile_ncu.sh stage-0-vllm
+  ./benchmarks/profile_ncu.sh stage-1-vllm
+
+  # Custom track (from scratch)
+  ./benchmarks/profile_ncu.sh stage-0-custom
+  ./benchmarks/profile_ncu.sh stage-1-custom
   ```
 
-For the reference baseline, use `stage-0-vllm`. The current script performs an eager forward pass on selected operations, including Layer 0 and `lm_head`, for a prefill shape and a decode shape. Check the script for the exact shapes and replay procedure before interpreting results.
+For `stage-1-vllm` (or stages containing speculative decoding), the script automatically detects the draft model and profiles Target Layer 0 verification at batch size $M = K + 1$ (where $K$ is the number of drafted tokens) alongside Prefill. For standard stages, it profiles single-token decode ($M = 1$).
 
 **Outputs:**
 - `kernels.ncu-rep` (in `benchmarks/profiles/<stage-name>/`) — Full trace for the Nsight Compute GUI.
@@ -257,7 +276,7 @@ uv run python benchmarks/plot_dashboard.py
 uv run python benchmarks/plot_dashboard.py --stages stage-0-vllm
 
 # Compare stages
-uv run python benchmarks/plot_dashboard.py --stages stage-0-vllm stage-1-naive -o comparison.html
+uv run python benchmarks/plot_dashboard.py --stages stage-0-vllm stage-1-vllm -o comparison.html
 ```
 
 Open the generated HTML file in a browser. By default, the dashboard is saved to `benchmarks/results/dashboard.html`; when using `-o`, check the path supplied to that option.
@@ -315,6 +334,23 @@ $$\mathrm{TPOT} = \frac{T_{\mathrm{last}} - T_{\mathrm{first}}}{N - 1}$$
 
 Use consistent timestamp boundaries and verify the benchmark's implementation. TPOT is an average, not a percentile and not end-to-end latency. ITL percentiles describe the distribution of individual token intervals.
 
+### Speculative Decoding Speedup Formulation
+
+For stages testing speculative decoding (e.g. `stage-1-vllm`), overall latency change can be modeled using the approximation:
+
+$$\text{Estimated speedup} \approx \frac{L_{\text{acc}} \cdot t_{\text{decode}}}{K \cdot t_{\text{draft}} + t_{\text{verify}}}$$
+
+Where:
+* **$L_{\text{acc}}$**: Mean number of output tokens produced per verification round, including the bonus token where applicable ($1 \le L_{\text{acc}} \le K + 1$).
+* **$K$**: Number of draft tokens proposed per round ($K = 5$).
+* **$t_{\text{draft}}$**: Time spent generating each draft token (so $K \cdot t_{\text{draft}}$ is the total drafting time per round).
+* **$t_{\text{verify}}$**: Time for the target model to verify candidate tokens in parallel.
+* **$t_{\text{decode}}$**: Baseline time to generate one token using the target model alone.
+
+*This formula is an explanatory approximation: actual speedup depends on the engine implementation, batching, sampling configuration, and serving overheads.*
+
+> **Experimental Note:** Speculative decoding trades draft-model computation for fewer sequential target-model decoding steps. Its benefit depends on draft overhead, acceptance rate, and target verification cost. Use a fixed prompt and greedy sampling where supported to improve repeatability, and measure acceptance behavior alongside latency and throughput. See [REPORTS.md](REPORTS.md) for the experiment hypothesis and results.
+
 > **Diagnostic Caution:** Interpret results as evidence, not automatic diagnoses. High TTFT does not prove a GEMM bottleneck; high TPOT does not prove memory-bandwidth saturation; and higher GPU activity does not necessarily mean more useful work. Compare throughput alongside latency and error rate.
 
 ---
@@ -334,10 +370,11 @@ Use the same workflow for each new vLLM configuration or self-made engine:
 ### Example Stage Execution
 
 ```bash
-./benchmarks/bench_closed_loop.sh stage-1-naive
-./benchmarks/profile_nsys.sh stage-1-naive
-./benchmarks/profile_ncu.sh stage-1-naive
-uv run python benchmarks/plot_dashboard.py --stages stage-0-vllm stage-1-naive -o comparison.html
+# Example for a custom stage
+./benchmarks/bench_closed_loop.sh stage-0-custom
+./benchmarks/profile_nsys.sh stage-0-custom
+./benchmarks/profile_ncu.sh stage-0-custom
+uv run python benchmarks/plot_dashboard.py --stages stage-0-vllm stage-0-custom -o comparison.html
 ```
 
 Keep implementation-specific launch and profiling details near that implementation, while this file remains the common procedure. Update commands and defaults when repository scripts change, and label planned functionality as planned until it is implemented and tested.
