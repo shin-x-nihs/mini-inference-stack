@@ -334,24 +334,73 @@ def build_plot4_roofline(stages: list[dict]) -> go.Figure:
 
 
 def build_tables_html(stages: list[dict]) -> str:
-    # Table A: Nsight Systems
+    # Table A: Nsight Systems Timeline Overview
     nsys_rows = ""
     for s in stages:
         n = s["nsys"]
         if not n:
             continue
+
+        wall_ms = n.get("wall_time_ms", 0.0)
+        num_k = n.get("num_kernels")
+        wall_sub = f' <span class="sub">({num_k:,} kernels)</span>' if num_k is not None else ""
+
+        act_pct = n.get("gpu_active_pct", 0.0)
+        act_ms = n.get("gpu_active_ms")
+        act_sub = f' <span class="sub">({act_ms:.1f} ms)</span>' if act_ms is not None else ""
+
+        idle_pct = n.get("gpu_idle_pct", 0.0)
+        idle_ms = n.get("gpu_idle_ms")
+        idle_sub = f' <span class="sub">({idle_ms:.1f} ms)</span>' if idle_ms is not None else ""
+
+        launch_ms = n.get("cpu_launch_overhead_ms")
+        if launch_ms is not None:
+            calls = n.get("cpu_launch_calls", 0)
+            graphs = n.get("cuda_graph_launches", 0)
+            sub_parts = [f"{calls:,} calls"] + ([f"{graphs} graphs"] if graphs else [])
+            launch_cell = f'{launch_ms:.2f} ms <span class="sub">({", ".join(sub_parts)})</span>'
+        else:
+            launch_cell = "-"
+
+        sync_ms = n.get("cuda_sync_wait_ms", 0.0)
+
+        pref_ms = n.get("prefill_duration_ms", 0.0)
+        pref_pct = n.get("prefill_wall_pct")
+        pref_sub = f' <span class="sub">({pref_pct:.1f}%)</span>' if pref_pct is not None else ""
+
+        dec_step = n.get("decode_step_avg_ms", 0.0)
+        dec_tot = n.get("decode_total_ms")
+        dec_sub = f' <span class="sub">({dec_tot:.1f} ms total)</span>' if dec_tot is not None else ""
+
+        kb = n.get("kernel_time_breakdown")
+        if kb:
+            lin_p = kb.get("linear_pct", 0.0)
+            att_p = kb.get("attention_pct", 0.0)
+            oth_p = kb.get("norm_act_other_pct", 0.0)
+            lin_m = kb.get("linear_ms", 0.0)
+            att_m = kb.get("attention_ms", 0.0)
+            oth_m = kb.get("norm_act_other_ms", 0.0)
+            kb_cell = (
+                f"{lin_p:.1f}% / {att_p:.1f}% / {oth_p:.1f}% "
+                f'<span class="sub">({lin_m:.1f} / {att_m:.1f} / {oth_m:.1f} ms)</span>'
+            )
+        else:
+            kb_cell = "-"
+
         nsys_rows += f"""
         <tr>
             <td class="stage-cell">{s['name']}</td>
-            <td>{n.get('wall_time_ms', 0):.2f}</td>
-            <td class="highlight-red">{n.get('gpu_active_pct', 0):.2f}%</td>
-            <td>{n.get('gpu_idle_pct', 0):.2f}%</td>
-            <td>{n.get('cuda_sync_wait_ms', 0):.2f}</td>
-            <td>{n.get('prefill_duration_ms', 0):.2f}</td>
-            <td>{n.get('decode_step_avg_ms', 0):.2f}</td>
+            <td>{wall_ms:.2f}{wall_sub}</td>
+            <td><span class="highlight-red">{act_pct:.1f}%</span>{act_sub}</td>
+            <td>{idle_pct:.1f}%{idle_sub}</td>
+            <td>{launch_cell}</td>
+            <td>{sync_ms:.2f}</td>
+            <td>{pref_ms:.2f} ms{pref_sub}</td>
+            <td>{dec_step:.2f} ms/step{dec_sub}</td>
+            <td>{kb_cell}</td>
         </tr>"""
 
-    # Table B: Nsight Compute (100% factual hardware measurements)
+    # Table B: Nsight Compute Kernel Details
     ncu_rows = ""
     for s in stages:
         ncu = s["ncu"]
@@ -362,22 +411,24 @@ def build_tables_html(stages: list[dict]) -> str:
         peak_tc = ceilings.get("estimated_peak_tensor_tflops", 100.0)
 
         for k in ncu.get("kernels", []):
-            dram_gbps = k.get("achieved_dram_gbps", 0.0)
-            dram_ceil_pct = (dram_gbps / peak_dram) * 100.0 if peak_dram > 0 else 0.0
+            dram_pct = k.get("dram_utilization_pct", 0.0)
+            if dram_pct == 0.0 and peak_dram > 0:
+                dram_pct = (k.get("achieved_dram_gbps", 0.0) / peak_dram) * 100.0
 
-            tflops = k.get("attained_tflops", 0.0)
-            comp_ceil_pct = (tflops / peak_tc) * 100.0 if peak_tc > 0 else 0.0
+            comp_pct = k.get("compute_utilization_pct", 0.0)
+            if comp_pct == 0.0 and peak_tc > 0:
+                comp_pct = (k.get("attained_tflops", 0.0) / peak_tc) * 100.0
 
             ai = k.get("arithmetic_intensity_flop_byte", 0.0)
-
             phase_badge = f"<span class='badge badge-{k.get('phase', '').lower()}'>{k.get('phase', '')}</span>"
+
             ncu_rows += f"""
             <tr>
                 <td class="stage-cell">{s['name']}</td>
                 <td>{phase_badge} {k.get('label', '')}</td>
                 <td>{k.get('execution_time_us', 0):.2f}</td>
-                <td>{dram_gbps:.1f} GB/s <span class="sub">({dram_ceil_pct:.1f}% of ceiling)</span></td>
-                <td>{tflops:.2f} TFLOP/s <span class="sub">({comp_ceil_pct:.1f}% of ceiling)</span></td>
+                <td>{dram_pct:.1f}% <span class="sub">({k.get('achieved_dram_gbps', 0):.1f} GB/s)</span></td>
+                <td>{comp_pct:.1f}% <span class="sub">({k.get('attained_tflops', 0):.2f} TFLOP/s)</span></td>
                 <td class="ai-cell">{ai:.2f}</td>
                 <td>{k.get('active_warps_pct', 0):.1f}%</td>
                 <td>{k.get('registers_per_thread', 0)}</td>
@@ -394,13 +445,15 @@ def build_tables_html(stages: list[dict]) -> str:
                         <th>Stage</th>
                         <th>Wall Time (ms)</th>
                         <th>GPU Active Time (%)</th>
-                        <th>GPU Idle / Gaps (%)</th>
-                        <th>CUDA API Wait (ms)</th>
-                        <th>Prefill Duration (ms)</th>
-                        <th>Decode Step Avg (ms)</th>
+                        <th>GPU Idle (%)</th>
+                        <th>CPU Launch Overhead</th>
+                        <th>CUDA Sync Wait (ms)</th>
+                        <th>Prefill Duration</th>
+                        <th>Decode Duration</th>
+                        <th>Kernel Time (Lin / Attn / Oth)</th>
                     </tr>
                 </thead>
-                <tbody>{nsys_rows or '<tr><td colspan="7">No nsys_metrics.json found</td></tr>'}</tbody>
+                <tbody>{nsys_rows or '<tr><td colspan="9">No nsys_metrics.json found</td></tr>'}</tbody>
             </table>
         </div>
 
@@ -412,8 +465,8 @@ def build_tables_html(stages: list[dict]) -> str:
                         <th>Stage</th>
                         <th>Kernel Name</th>
                         <th>Execution Time (us)</th>
-                        <th>Achieved DRAM</th>
-                        <th>Attained Compute</th>
+                        <th>DRAM Utilization (%)</th>
+                        <th>Compute Utilization (%)</th>
                         <th>Arithmetic Intensity (FLOP/B)</th>
                         <th>Active Warps (%)</th>
                         <th>Registers / Thread</th>
@@ -552,6 +605,7 @@ def generate_dashboard(stages: list[dict], output_path: Path):
             text-align: left;
             padding: 10px 12px;
             border-bottom: 1px solid #222222;
+            white-space: nowrap;
         }}
         th {{
             color: {TEXT_MUTED};
