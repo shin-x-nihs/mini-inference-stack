@@ -203,6 +203,12 @@ These are learning experiments, not guaranteed improvements. Each optimization i
 
 ---
 
+## AI Assistance
+
+AI coding tools were used for implementation, debugging, and documentation. Design decisions, experiments, and performance results are reviewed against the project's goals.
+
+---
+
 ## License
 
 This project is released under the [MIT License](LICENSE).
