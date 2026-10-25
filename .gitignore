@@ -69,6 +69,6 @@ desktop.ini
 .files/
 
 # Local agent guides (root + subfolders)
-AGENTS.md
+**/AGENTS.md
 repomix-output.xml
 repomix.sh
