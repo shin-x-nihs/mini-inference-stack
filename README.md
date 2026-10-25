@@ -80,7 +80,7 @@ mini-inference-stack/
     ├── profile_ncu.sh              # Nsight Compute kernel profiling
     ├── plot_dashboard.py           # Generates the HTML comparison dashboard
     ├── results/                    # Benchmark JSONs and generated dashboards
-    └── profiles/                   # Raw profiler traces (.nsys-rep, .ncu-rep)
+    └── profiles/                   # Raw profiler traces (.nsys-rep, .sqlite, .txt, .ncu-rep)
 ```
 
 ---

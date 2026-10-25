@@ -38,23 +38,23 @@ mkdir -p "${PROF_DIR}" "${RES_DIR}"
 
 REP_FILE="${PROF_DIR}/timeline.nsys-rep"
 SQLITE_FILE="${PROF_DIR}/timeline.sqlite"
-PROBE_JSON="${PROF_DIR}/probe_client.json"
+STATS_TXT="${PROF_DIR}/nsys_stats.txt"
 METRICS_JSON="${RES_DIR}/nsys_metrics.json"
 
 echo "=========================================================="
 echo " Nsight Systems Timeline Profiler"
 echo " Target Stage:   ${STAGE}"
 echo " Trace Output:   ${REP_FILE}"
+echo " Stats Output:   ${STATS_TXT}"
 echo " Metrics JSON:   ${METRICS_JSON}"
 echo " Workload:       C=1 | In=${PROF_IN} tokens | Out=${PROF_OUT} tokens"
 echo "=========================================================="
 
 run_probe() {
-    local save_path=$1
-    uv run python3 - "${BASE_URL}" "${MODEL_NAME}" "${PROF_IN}" "${PROF_OUT}" "${save_path}" << 'EOF'
-import json, sys, time, urllib.request
+    uv run python3 - "${BASE_URL}" "${MODEL_NAME}" "${PROF_IN}" "${PROF_OUT}" << 'EOF'
+import json, sys, urllib.request
 
-base_url, model, in_len, out_len, save_path = sys.argv[1], sys.argv[2], int(sys.argv[3]), int(sys.argv[4]), sys.argv[5]
+base_url, model, in_len, out_len = sys.argv[1], sys.argv[2], int(sys.argv[3]), int(sys.argv[4])
 prompt = " repeat" * max(1, in_len - 5)
 
 payload = json.dumps({
@@ -72,35 +72,9 @@ req = urllib.request.Request(
     headers={"Content-Type": "application/json"}
 )
 
-t0 = time.perf_counter()
-t_first = None
-chunks = 0
-
 with urllib.request.urlopen(req, timeout=120) as resp:
-    for line in resp:
-        line_str = line.decode("utf-8").strip()
-        if not line_str.startswith("data: ") or line_str == "data: [DONE]":
-            continue
-        data = json.loads(line_str[6:])
-        delta = data["choices"][0].get("delta", {})
-        if delta.get("content"):
-            if t_first is None:
-                t_first = time.perf_counter()
-            chunks += 1
-
-t_end = time.perf_counter()
-ttft_ms = (t_first - t0) * 1000.0 if t_first else 0.0
-decode_total_ms = (t_end - t_first) * 1000.0 if t_first else 0.0
-decode_avg_ms = decode_total_ms / max(1, chunks - 1)
-
-if save_path != "/dev/null":
-    with open(save_path, "w", encoding="utf-8") as f:
-        json.dump({
-            "client_wall_ms": (t_end - t0) * 1000.0,
-            "client_ttft_ms": ttft_ms,
-            "client_decode_avg_ms": decode_avg_ms,
-            "output_tokens": chunks
-        }, f, indent=2)
+    for _ in resp:
+        pass
 EOF
 }
 
@@ -108,13 +82,13 @@ EOF
 nsys stop >/dev/null 2>&1 || true
 
 # 3. Warmup pass (unprofiled)
-echo ">>> [1/4] Running unprofiled warmup request..."
-run_probe "/dev/null"
+echo ">>> [1/5] Running unprofiled warmup request..."
+run_probe
 
 # 4. Profiled pass (bare start/stop to avoid reconfiguring the launched session)
-echo ">>> [2/4] Capturing Nsight Systems trace..."
+echo ">>> [2/5] Capturing Nsight Systems trace..."
 nsys start
-run_probe "${PROBE_JSON}"
+run_probe
 nsys stop
 
 LATEST_REP="$(ls -t "${REPO_ROOT}"/report*.nsys-rep 2>/dev/null | head -n 1 || true)"
@@ -124,25 +98,35 @@ if [[ -z "${LATEST_REP}" ]]; then
 fi
 mv -f "${LATEST_REP}" "${REP_FILE}"
 
-# 5. Export to SQLite for exact interval union calculation
-echo ">>> [3/4] Exporting trace to SQLite..."
+# 5. Export to SQLite and populate the 4 core summary tables
+echo ">>> [3/5] Exporting trace to SQLite..."
 nsys export --type=sqlite --output="${SQLITE_FILE}" --force-overwrite=true "${REP_FILE}"
 
-# 6. Parse SQLite database and compute timeline metrics into JSON
-echo ">>> [4/4] Computing timeline metrics (interval union & sync overhead)..."
-uv run python3 - "${SQLITE_FILE}" "${PROBE_JSON}" "${METRICS_JSON}" "${PROF_OUT}" << 'EOF'
+echo ">>> [4/5] Building 4 core summary tables (Kernel, API, MemOps, OSRT)..."
+nsys stats \
+    --report cuda_gpu_kern_sum,cuda_api_sum,cuda_gpu_mem_time_sum,osrt_sum \
+    "${SQLITE_FILE}" > "${STATS_TXT}"
+
+# 6. Parse SQLite database and compute timeline & kernel breakdown metrics into JSON
+echo ">>> [5/5] Computing timeline metrics & kernel category breakdown..."
+uv run python3 - "${SQLITE_FILE}" "${METRICS_JSON}" "${STAGE}" "${PROF_IN}" "${PROF_OUT}" << 'EOF'
 import json, sqlite3, sys
 
-sqlite_path, probe_path, out_json, expected_out = sys.argv[1:5]
+sqlite_path, out_json, stage_name, in_len, expected_out = sys.argv[1:6]
+in_len = int(in_len)
 expected_out = int(expected_out)
-
-with open(probe_path, "r", encoding="utf-8") as f:
-    probe = json.load(f)
+decode_steps = max(1, expected_out - 1)
 
 conn = sqlite3.connect(sqlite_path)
 cur = conn.cursor()
 
-cur.execute("SELECT start, end FROM CUPTI_ACTIVITY_KIND_KERNEL ORDER BY start ASC")
+# 1. Fetch all GPU kernel executions with demangled names
+cur.execute("""
+    SELECT k.start, k.end, COALESCE(s.value, '')
+    FROM CUPTI_ACTIVITY_KIND_KERNEL k
+    LEFT JOIN StringIds s ON k.demangledName = s.id
+    ORDER BY k.start ASC
+""")
 kernels = cur.fetchall()
 
 if not kernels:
@@ -151,19 +135,41 @@ if not kernels:
 w_start = kernels[0][0]
 w_end = max(k[1] for k in kernels)
 wall_ns = max(1, w_end - w_start)
+num_kernels = len(kernels)
 
+# 2. Interval union for exact non-overlapping GPU Active vs. Idle time
 merged = []
-for s, e in kernels:
+for s, e, _ in kernels:
     if not merged or s > merged[-1][1]:
         merged.append([s, e])
     else:
         merged[-1][1] = max(merged[-1][1], e)
 
 gpu_active_ns = sum(e - s for s, e in merged)
+gpu_idle_ns = max(0, wall_ns - gpu_active_ns)
 gpu_active_pct = (gpu_active_ns / wall_ns) * 100.0
 gpu_idle_pct = 100.0 - gpu_active_pct
 
+# 3. Classify GPU kernel time by operator category (Linear vs. Attention vs. Norm/Other)
+cat_ns = {"linear": 0, "attention": 0, "norm_act_other": 0}
+for s, e, name in kernels:
+    dur = max(0, e - s)
+    low = name.lower()
+    if any(k in low for k in ("gemm", "gemv", "cutlass", "cublas", "matmul", "wgrad", "dgrad")):
+        cat_ns["linear"] += dur
+    elif any(k in low for k in ("flash", "attention", "fmha", "splitkv", "sdpa", "paged_attention")):
+        cat_ns["attention"] += dur
+    else:
+        cat_ns["norm_act_other"] += dur
+
+total_kern_ns = max(1, sum(cat_ns.values()))
+
+# 4. CPU CUDA Runtime overhead (Launch overhead vs. Host Sync wait) within active window
+launch_ns = 0
+launch_calls = 0
+graph_launches = 0
 sync_ns = 0
+
 cur.execute("""
     SELECT r.start, r.end, s.value
     FROM CUPTI_ACTIVITY_KIND_RUNTIME r
@@ -172,13 +178,20 @@ cur.execute("""
 """, (w_start, w_end))
 
 for s, e, name in cur.fetchall():
-    if "Synchronize" in name:
-        clipped_s = max(s, w_start)
-        clipped_e = min(e, w_end)
-        if clipped_e > clipped_s:
-            sync_ns += (clipped_e - clipped_s)
+    clipped_s = max(s, w_start)
+    clipped_e = min(e, w_end)
+    dur = max(0, clipped_e - clipped_s)
+    if "Launch" in name:
+        launch_ns += dur
+        launch_calls += 1
+        if "GraphLaunch" in name:
+            graph_launches += 1
+    elif "Synchronize" in name:
+        sync_ns += dur
 
+# 5. Prefill vs. Decode phase split (NVTX if available, else GPU Kernel Timeline Split)
 prefill_ms = None
+decode_total_ms = None
 decode_step_ms = None
 phase_source = "NVTX"
 
@@ -193,24 +206,65 @@ if cur.fetchone():
     nvtx_rows = cur.fetchall()
     prefill_ns = [e - s for s, e, txt in nvtx_rows if "prefill_step" in txt.lower()]
     decode_ns = [e - s for s, e, txt in nvtx_rows if "decode_step" in txt.lower()]
-    if prefill_ns:
+    if prefill_ns and decode_ns:
         prefill_ms = sum(prefill_ns) / 1e6
-    if decode_ns:
-        total_dec_ms = sum(decode_ns) / 1e6
-        decode_step_ms = total_dec_ms / len(decode_ns) if len(decode_ns) > 1 else total_dec_ms / max(1, expected_out - 1)
+        decode_total_ms = sum(decode_ns) / 1e6
+        decode_step_ms = decode_total_ms / len(decode_ns) if len(decode_ns) > 1 else decode_total_ms / decode_steps
 
 if prefill_ms is None or decode_step_ms is None:
-    phase_source = "Client Stream Fallback"
-    prefill_ms = probe["client_ttft_ms"]
-    decode_step_ms = probe["client_decode_avg_ms"]
+    phase_source = "GPU Kernel Timeline Split"
+    approx_step_kernels = max(1, num_kernels // expected_out)
+    lo = max(1, int(approx_step_kernels * 0.5))
+    hi = min(num_kernels - 1, int(approx_step_kernels * 1.6))
+
+    best_split_ns = kernels[approx_step_kernels - 1][1]
+    max_gap = -1
+    running_end = kernels[0][1]
+    for i in range(1, hi + 1):
+        s, e, _ = kernels[i]
+        if i >= lo:
+            gap = s - running_end
+            if gap > max_gap:
+                max_gap = gap
+                best_split_ns = running_end
+        if e > running_end:
+            running_end = e
+
+    prefill_ms = (best_split_ns - w_start) / 1e6
+    decode_total_ms = (w_end - best_split_ns) / 1e6
+    decode_step_ms = decode_total_ms / decode_steps
+
+wall_ms = wall_ns / 1e6
 
 metrics = {
-    "wall_time_ms": round(wall_ns / 1e6, 2),
+    "stage": stage_name,
+    "workload": {
+        "concurrency": 1,
+        "input_len": in_len,
+        "output_len": expected_out
+    },
+    "wall_time_ms": round(wall_ms, 2),
+    "num_kernels": num_kernels,
+    "gpu_active_ms": round(gpu_active_ns / 1e6, 2),
     "gpu_active_pct": round(gpu_active_pct, 2),
+    "gpu_idle_ms": round(gpu_idle_ns / 1e6, 2),
     "gpu_idle_pct": round(gpu_idle_pct, 2),
+    "cpu_launch_overhead_ms": round(launch_ns / 1e6, 2),
+    "cpu_launch_calls": launch_calls,
+    "cuda_graph_launches": graph_launches,
     "cuda_sync_wait_ms": round(sync_ns / 1e6, 2),
     "prefill_duration_ms": round(prefill_ms, 2),
+    "prefill_wall_pct": round((prefill_ms / wall_ms) * 100.0, 1),
+    "decode_total_ms": round(decode_total_ms, 2),
     "decode_step_avg_ms": round(decode_step_ms, 2),
+    "kernel_time_breakdown": {
+        "linear_ms": round(cat_ns["linear"] / 1e6, 2),
+        "linear_pct": round((cat_ns["linear"] / total_kern_ns) * 100.0, 1),
+        "attention_ms": round(cat_ns["attention"] / 1e6, 2),
+        "attention_pct": round((cat_ns["attention"] / total_kern_ns) * 100.0, 1),
+        "norm_act_other_ms": round(cat_ns["norm_act_other"] / 1e6, 2),
+        "norm_act_other_pct": round((cat_ns["norm_act_other"] / total_kern_ns) * 100.0, 1)
+    },
     "phase_measurement_source": phase_source
 }
 
@@ -220,7 +274,8 @@ with open(out_json, "w", encoding="utf-8") as f:
 print(json.dumps(metrics, indent=2))
 EOF
 
-rm -f "${SQLITE_FILE}" "${PROBE_JSON}"
 echo "----------------------------------------------------------"
 echo "Saved GUI trace: ${REP_FILE}"
+echo "Saved SQLite:    ${SQLITE_FILE}"
+echo "Saved Stats:     ${STATS_TXT}"
 echo "Saved JSON:      ${METRICS_JSON}"

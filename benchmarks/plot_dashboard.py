@@ -351,7 +351,7 @@ def build_tables_html(stages: list[dict]) -> str:
             <td>{n.get('decode_step_avg_ms', 0):.2f}</td>
         </tr>"""
 
-    # Table B: Nsight Compute
+    # Table B: Nsight Compute (100% factual hardware measurements)
     ncu_rows = ""
     for s in stages:
         ncu = s["ncu"]
@@ -362,13 +362,13 @@ def build_tables_html(stages: list[dict]) -> str:
         peak_tc = ceilings.get("estimated_peak_tensor_tflops", 100.0)
 
         for k in ncu.get("kernels", []):
-            dram_pct = k.get("dram_utilization_pct", 0.0)
-            if dram_pct == 0.0 and peak_dram > 0:
-                dram_pct = (k.get("achieved_dram_gbps", 0.0) / peak_dram) * 100.0
+            dram_gbps = k.get("achieved_dram_gbps", 0.0)
+            dram_ceil_pct = (dram_gbps / peak_dram) * 100.0 if peak_dram > 0 else 0.0
 
-            comp_pct = k.get("compute_utilization_pct", 0.0)
-            if comp_pct == 0.0 and peak_tc > 0:
-                comp_pct = (k.get("attained_tflops", 0.0) / peak_tc) * 100.0
+            tflops = k.get("attained_tflops", 0.0)
+            comp_ceil_pct = (tflops / peak_tc) * 100.0 if peak_tc > 0 else 0.0
+
+            ai = k.get("arithmetic_intensity_flop_byte", 0.0)
 
             phase_badge = f"<span class='badge badge-{k.get('phase', '').lower()}'>{k.get('phase', '')}</span>"
             ncu_rows += f"""
@@ -376,12 +376,12 @@ def build_tables_html(stages: list[dict]) -> str:
                 <td class="stage-cell">{s['name']}</td>
                 <td>{phase_badge} {k.get('label', '')}</td>
                 <td>{k.get('execution_time_us', 0):.2f}</td>
-                <td>{dram_pct:.1f}% <span class="sub">({k.get('achieved_dram_gbps', 0):.1f} GB/s)</span></td>
-                <td>{comp_pct:.1f}% <span class="sub">({k.get('attained_tflops', 0):.2f} TFLOP/s)</span></td>
+                <td>{dram_gbps:.1f} GB/s <span class="sub">({dram_ceil_pct:.1f}% of ceiling)</span></td>
+                <td>{tflops:.2f} TFLOP/s <span class="sub">({comp_ceil_pct:.1f}% of ceiling)</span></td>
+                <td class="ai-cell">{ai:.2f}</td>
                 <td>{k.get('active_warps_pct', 0):.1f}%</td>
                 <td>{k.get('registers_per_thread', 0)}</td>
                 <td>{k.get('local_spills_bytes', 0)}</td>
-                <td class="bottleneck">{k.get('dominant_bottleneck', '-')}</td>
             </tr>"""
 
     return f"""
@@ -412,12 +412,12 @@ def build_tables_html(stages: list[dict]) -> str:
                         <th>Stage</th>
                         <th>Kernel Name</th>
                         <th>Execution Time (us)</th>
-                        <th>DRAM Utilization (%)</th>
-                        <th>Compute Utilization (%)</th>
+                        <th>Achieved DRAM</th>
+                        <th>Attained Compute</th>
+                        <th>Arithmetic Intensity (FLOP/B)</th>
                         <th>Active Warps (%)</th>
                         <th>Registers / Thread</th>
                         <th>Local Spills (B)</th>
-                        <th>Dominant Bottleneck</th>
                     </tr>
                 </thead>
                 <tbody>{ncu_rows or '<tr><td colspan="9">No ncu_metrics.json found</td></tr>'}</tbody>
@@ -564,6 +564,7 @@ def generate_dashboard(stages: list[dict], output_path: Path):
         tr:hover td {{ background-color: #191919; }}
         .stage-cell {{ font-weight: 700; color: #ffffff; }}
         .highlight-red {{ color: #ff2a2a; font-weight: 700; }}
+        .ai-cell {{ color: #ff7b54; font-weight: 600; }}
         .sub {{ color: #777777; font-size: 11px; }}
         .badge {{
             display: inline-block;
@@ -576,7 +577,6 @@ def generate_dashboard(stages: list[dict], output_path: Path):
         }}
         .badge-prefill {{ background: #ff2a2a; color: #000000; }}
         .badge-decode {{ background: #ffffff; color: #000000; }}
-        .bottleneck {{ color: #ff7b54; }}
         @media (max-width: 1100px) {{ .grid-2x2 {{ grid-template-columns: 1fr; }} }}
     </style>
 </head>

@@ -45,6 +45,7 @@ triton_cache/
 *.nvprof
 *.pt.trace.json
 *.sqlite
+nsys_stats.txt
 
 # Local logs and generated output
 logs/
@@ -66,3 +67,8 @@ desktop.ini
 
 .chainlit/
 .files/
+
+# Local agent guides (root + subfolders)
+AGENT.md
+repomix-output.xml
+repomix.sh

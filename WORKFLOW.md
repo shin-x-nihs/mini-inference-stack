@@ -15,7 +15,7 @@ A shared guide for running the inference server, checking functionality, benchma
 | **1. Start** | Start the selected implementation | — | Loads the model and starts the API | API at `127.0.0.1:8000/v1` |
 | **2. Check** | Keep the server running | UI or quick API probe | Verifies requests and streaming work | Functional verification |
 | **3. Benchmark** | Keep the server running | `./benchmarks/bench_closed_loop.sh <stage-name>` | Measures throughput and latency under standard workloads | Raw JSON in `benchmarks/results/<stage-name>/` |
-| **4a. Profile (`nsys`)** | Restart in profiler-ready mode | `./benchmarks/profile_nsys.sh <stage-name>` | Shows where time is spent across CPU, CUDA, and GPU activity | `.nsys-rep` and `nsys_metrics.json` |
+| **4a. Profile (`nsys`)** | Restart in profiler-ready mode | `./benchmarks/profile_nsys.sh <stage-name>` | Shows where time is spent across CPU, CUDA, and GPU activity | `.nsys-rep`, `.sqlite`, `nsys_stats.txt`, `nsys_metrics.json` |
 | **4b. Profile (`ncu`)** | Stop the server if using standalone replay | `./benchmarks/profile_ncu.sh <stage-name>` | Examines selected kernels and hardware behavior | `.ncu-rep` and `ncu_metrics.json` (Roofline data) |
 | **5. Plot** | — | `uv run python benchmarks/plot_dashboard.py` | Compares benchmark and profiler results | `benchmarks/results/dashboard.html` |
 | **6. Record** | — | Save notes and commit relevant files | Preserves the setup, measurements, and conclusions | Reproducible experiment record |
@@ -199,14 +199,16 @@ For the reference baseline, use `stage-0-vllm` as the stage name. For another en
 
 **Outputs:**
 - `timeline.nsys-rep` (in `benchmarks/profiles/<stage-name>/`) — Full trace for the Nsight Systems GUI.
-- `nsys_metrics.json` (in `benchmarks/results/<stage-name>/`) — Timeline summary metrics (visualized in Table A within `dashboard.html`).
+- `timeline.sqlite` (in `benchmarks/profiles/<stage-name>/`) — SQLite database with CUPTI activity and runtime records.
+- `nsys_stats.txt` (in `benchmarks/profiles/<stage-name>/`) — Summary tables for GPU kernels, CUDA API, memory ops, and OSRT.
+- `nsys_metrics.json` (in `benchmarks/results/<stage-name>/`) — Timeline and kernel breakdown metrics (visualized in Table A within `dashboard.html`).
 
 **Interpret timeline metrics carefully:**
 - **GPU Active Time:** Should represent the union of active intervals if reported as wall-clock activity. Do not add overlapping kernel durations and call the sum GPU busy time.
 - **GPU Idle Gaps:** Show periods without recorded GPU work, but do not automatically prove CPU overhead.
 - **CUDA API Wait Time:** Means a host thread is waiting; it does not necessarily mean the GPU is idle.
 - **Efficiency vs. Activity:** GPU activity does not by itself mean the kernels are efficient or compute-bound.
-- **Phase Ranges:** Prefill/decode ranges are available only if the application or profiler setup actually emits them.
+- **Phase Ranges:** Separate prefill and decode ranges are reported for the request.
 
 ---
 
@@ -224,7 +226,7 @@ For the reference baseline, use `stage-0-vllm`. The current script performs an e
 
 **Outputs:**
 - `kernels.ncu-rep` (in `benchmarks/profiles/<stage-name>/`) — Full trace for the Nsight Compute GUI.
-- `ncu_metrics.json` (in `benchmarks/results/<stage-name>/`) — Kernel metrics and Roofline coordinates (visualized in Table B and Plot 4 within `dashboard.html`).
+- `ncu_metrics.json` (in `benchmarks/results/<stage-name>/`) — Kernel metrics and Roofline coordinates (visualized in Table B and Plot 4 within `dashboard.html`, showing achieved DRAM, attained compute, and arithmetic intensity).
 
 Useful evidence includes kernel duration, DRAM throughput relative to the supported peak, relevant compute-pipeline activity, active-warps/occupancy indicators, registers per thread, and local-memory spills. Metric names vary by GPU and Nsight Compute version, so validate them against the installed tool.
 
@@ -282,7 +284,7 @@ For each meaningful stage, record:
 5. **Artifacts:** Raw benchmark JSON/CSV, plots, profiler summaries, and relevant reports.
 6. **Conclusion:** What changed, what improved or regressed, the likely explanation, and the limitations of the result.
 
-Keep raw measurements; plots alone are not enough to reproduce or inspect an experiment. Full `.nsys-rep` and `.ncu-rep` files can be large, so retain them locally or in separate artifact storage if committing them would make the repository unwieldy.
+Keep raw measurements; plots alone are not enough to reproduce or inspect an experiment. Full `.nsys-rep`, `.sqlite`, `nsys_stats.txt`, and `.ncu-rep` files can be large, so retain them locally or in separate artifact storage if committing them would make the repository unwieldy.
 
 Example commit after reviewing the artifacts:
 
