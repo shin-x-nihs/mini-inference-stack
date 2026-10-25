@@ -1,0 +1,31 @@
+{
+  "stage": "stage-1-vllm",
+  "workload": {
+    "concurrency": 1,
+    "input_len": 1024,
+    "output_len": 64
+  },
+  "wall_time_ms": 776.26,
+  "num_kernels": 23484,
+  "gpu_active_ms": 502.47,
+  "gpu_active_pct": 64.73,
+  "gpu_idle_ms": 273.78,
+  "gpu_idle_pct": 35.27,
+  "cpu_launch_overhead_ms": 277.0,
+  "cpu_launch_calls": 19843,
+  "cuda_graph_launches": 13,
+  "cuda_sync_wait_ms": 22.78,
+  "prefill_duration_ms": 219.74,
+  "prefill_wall_pct": 28.3,
+  "decode_total_ms": 556.51,
+  "decode_step_avg_ms": 8.83,
+  "kernel_time_breakdown": {
+    "linear_ms": 450.88,
+    "linear_pct": 89.7,
+    "attention_ms": 3.63,
+    "attention_pct": 0.7,
+    "norm_act_other_ms": 47.96,
+    "norm_act_other_pct": 9.5
+  },
+  "phase_measurement_source": "GPU Kernel Timeline Split"
+}

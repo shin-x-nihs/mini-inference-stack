@@ -8,6 +8,7 @@ draft_model:
   name: "Qwen/Qwen2.5-Coder-0.5B-Instruct"
   dtype: "bfloat16"
   max_model_len: 9216
+  num_speculative_tokens: 5
 
 # for showcasing
 quantized_model:
@@ -28,6 +29,15 @@ ui:
 
 benchmarks:
   random_seed: 42
+  temperature: 0.0
+  prompt: >
+    Write a clean, well-documented Python module implementing a high-performance
+    matrix multiplication benchmark, a tiled reductions helper, and a streaming
+    token latency tracker with percentile statistics (P50, P90, P99), type
+    annotations, and unit tests.
+  # Open-loop arrival rate settings
+  input_len: 1024
+  output_len: 256
   # Plot 1: Throughput vs. Latency across client concurrency
   pareto:
     input_len: 512
@@ -38,3 +48,8 @@ benchmarks:
     lengths: [128, 256, 512, 1024, 2048, 4096, 8192]
     output_len: 64
     num_prompts: 10
+  # Nsight Systems & Nsight Compute profiling workloads
+  profiling:
+    input_len: 1024
+    output_len: 64
+    ncu_input_len: 2048

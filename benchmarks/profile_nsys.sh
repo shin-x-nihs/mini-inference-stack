@@ -18,6 +18,7 @@ if host == "0.0.0.0":
     host = "127.0.0.1"
 port = cfg["server"].get("port", 8000)
 
+d = cfg.get("draft_model", {})
 b = cfg.get("benchmarks", {})
 p = b.get("profiling", {})
 
@@ -25,6 +26,9 @@ in_len = p.get("input_len", 1024)
 out_len = p.get("output_len", 64)
 
 print(f"MODEL_NAME='{cfg['model']['name']}'")
+print(f"DRAFT_MODEL='{d.get('name', 'Qwen/Qwen2.5-Coder-0.5B-Instruct')}'")
+print(f"NUM_SPEC_TOKENS={d.get('num_speculative_tokens', 5)}")
+print(f"TEMPERATURE={b.get('temperature', 0.0)}")
 print(f"BASE_URL='http://{host}:{port}'")
 print(f"PROF_IN={in_len}")
 print(f"PROF_OUT={out_len}")
@@ -44,6 +48,11 @@ METRICS_JSON="${RES_DIR}/nsys_metrics.json"
 echo "=========================================================="
 echo " Nsight Systems Timeline Profiler"
 echo " Target Stage:   ${STAGE}"
+echo " Target Model:   ${MODEL_NAME}"
+if [[ "${STAGE}" == *"spec"* || "${STAGE}" == "stage-1"* ]]; then
+    echo " Draft Model:    ${DRAFT_MODEL} (K=${NUM_SPEC_TOKENS})"
+fi
+echo " Temperature:    ${TEMPERATURE}"
 echo " Trace Output:   ${REP_FILE}"
 echo " Stats Output:   ${STATS_TXT}"
 echo " Metrics JSON:   ${METRICS_JSON}"
@@ -51,17 +60,28 @@ echo " Workload:       C=1 | In=${PROF_IN} tokens | Out=${PROF_OUT} tokens"
 echo "=========================================================="
 
 run_probe() {
-    uv run python3 - "${BASE_URL}" "${MODEL_NAME}" "${PROF_IN}" "${PROF_OUT}" << 'EOF'
-import json, sys, urllib.request
+    uv run python3 - "${BASE_URL}" "${MODEL_NAME}" "${PROF_IN}" "${PROF_OUT}" "${TEMPERATURE}" << 'EOF'
+import json, sys, urllib.request, yaml
+from transformers import AutoTokenizer
 
-base_url, model, in_len, out_len = sys.argv[1], sys.argv[2], int(sys.argv[3]), int(sys.argv[4])
-prompt = " repeat" * max(1, in_len - 5)
+base_url, model, in_len, out_len, temp = (
+    sys.argv[1], sys.argv[2], int(sys.argv[3]), int(sys.argv[4]), float(sys.argv[5])
+)
+
+with open("config.yaml", "r", encoding="utf-8") as f:
+    cfg = yaml.safe_load(f)
+
+base_prompt = cfg["benchmarks"].get("prompt", "Write a Python module to benchmark matrix multiplication.").strip()
+tokenizer = AutoTokenizer.from_pretrained(model)
+base_ids = tokenizer.encode(base_prompt, add_special_tokens=False)
+reps = (in_len // max(1, len(base_ids))) + 2
+prompt = tokenizer.decode((base_ids * reps)[:in_len], skip_special_tokens=True)
 
 payload = json.dumps({
     "model": model,
     "messages": [{"role": "user", "content": prompt}],
     "max_tokens": out_len,
-    "temperature": 0.0,
+    "temperature": temp,
     "ignore_eos": True,
     "stream": True
 }).encode("utf-8")
@@ -120,9 +140,9 @@ decode_steps = max(1, expected_out - 1)
 conn = sqlite3.connect(sqlite_path)
 cur = conn.cursor()
 
-# 1. Fetch all GPU kernel executions with demangled names
+# 1. Fetch all GPU kernel executions with demangled names and gridX
 cur.execute("""
-    SELECT k.start, k.end, COALESCE(s.value, '')
+    SELECT k.start, k.end, COALESCE(s.value, ''), COALESCE(k.gridX, 0)
     FROM CUPTI_ACTIVITY_KIND_KERNEL k
     LEFT JOIN StringIds s ON k.demangledName = s.id
     ORDER BY k.start ASC
@@ -139,7 +159,7 @@ num_kernels = len(kernels)
 
 # 2. Interval union for exact non-overlapping GPU Active vs. Idle time
 merged = []
-for s, e, _ in kernels:
+for s, e, _, _ in kernels:
     if not merged or s > merged[-1][1]:
         merged.append([s, e])
     else:
@@ -152,7 +172,7 @@ gpu_idle_pct = 100.0 - gpu_active_pct
 
 # 3. Classify GPU kernel time by operator category (Linear vs. Attention vs. Norm/Other)
 cat_ns = {"linear": 0, "attention": 0, "norm_act_other": 0}
-for s, e, name in kernels:
+for s, e, name, _ in kernels:
     dur = max(0, e - s)
     low = name.lower()
     if any(k in low for k in ("gemm", "gemv", "cutlass", "cublas", "matmul", "wgrad", "dgrad")):
@@ -189,7 +209,7 @@ for s, e, name in cur.fetchall():
     elif "Synchronize" in name:
         sync_ns += dur
 
-# 5. Prefill vs. Decode phase split (NVTX if available, else GPU Kernel Timeline Split)
+# 5. Prefill vs. Decode phase split (NVTX -> Grid-Shape Boundary -> Gap Heuristic)
 prefill_ms = None
 decode_total_ms = None
 decode_step_ms = None
@@ -213,15 +233,30 @@ if cur.fetchone():
 
 if prefill_ms is None or decode_step_ms is None:
     phase_source = "GPU Kernel Timeline Split"
-    approx_step_kernels = max(1, num_kernels // expected_out)
-    lo = max(1, int(approx_step_kernels * 0.5))
-    hi = min(num_kernels - 1, int(approx_step_kernels * 1.6))
+    # Token-wise kernels launch 1 block per token (gridX >= in_len // 2 during prefill,
+    # vs. gridX == 1 or K+1 during baseline/speculative decode).
+    token_ops = ("rms_norm", "rotary", "reshape_and_cache", "act_and_mul")
+    prefill_limit = max(1, int(num_kernels * 0.35))
+    prefill_token_idxs = [
+        i for i in range(prefill_limit)
+        if kernels[i][3] >= (in_len // 2)
+        and any(op in kernels[i][2].lower() for op in token_ops)
+    ]
 
-    best_split_ns = kernels[approx_step_kernels - 1][1]
+    if prefill_token_idxs:
+        last_pref_idx = prefill_token_idxs[-1]
+        lo = last_pref_idx
+        hi = min(num_kernels - 1, last_pref_idx + 40)
+    else:
+        approx_step_kernels = max(1, num_kernels // expected_out)
+        lo = max(1, int(approx_step_kernels * 0.5))
+        hi = min(num_kernels - 1, int(approx_step_kernels * 1.6))
+
+    best_split_ns = kernels[lo][1]
     max_gap = -1
     running_end = kernels[0][1]
     for i in range(1, hi + 1):
-        s, e, _ = kernels[i]
+        s, e, _, _ = kernels[i]
         if i >= lo:
             gap = s - running_end
             if gap > max_gap:

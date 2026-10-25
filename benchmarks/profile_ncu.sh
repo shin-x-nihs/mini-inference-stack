@@ -15,12 +15,16 @@ with open("config.yaml", "r", encoding="utf-8") as f:
     cfg = yaml.safe_load(f)
 
 m = cfg.get("model", {})
+d = cfg.get("draft_model", {})
 b = cfg.get("benchmarks", {})
 p = b.get("profiling", {})
 
 print(f"MODEL_NAME='{m.get('name', 'Qwen/Qwen2.5-Coder-1.5B-Instruct')}'")
 print(f"DTYPE='{m.get('dtype', 'bfloat16')}'")
 print(f"MAX_LEN={m.get('max_model_len', 9216)}")
+print(f"DRAFT_MODEL='{d.get('name', 'Qwen/Qwen2.5-Coder-0.5B-Instruct')}'")
+print(f"CFG_SPEC_TOKENS={d.get('num_speculative_tokens', 5)}")
+print(f"TEMPERATURE={b.get('temperature', 0.0)}")
 print(f"GPU_MEM={cfg.get('server', {}).get('gpu_memory_utilization', 0.70)}")
 print(f"PROF_IN={p.get('ncu_input_len', 2048)}")
 EOF
@@ -31,31 +35,63 @@ PROF_DIR="benchmarks/profiles/${STAGE}"
 RES_DIR="benchmarks/results/${STAGE}"
 mkdir -p "${PROF_DIR}" "${RES_DIR}"
 
+# Enable speculative decoding automatically for "stage-1*" or "*spec*" stages (or via NCU_SPEC_TOKENS override)
+DEFAULT_SPEC_TOKENS=0
+if [[ "${STAGE}" == *"spec"* || "${STAGE}" == "stage-1"* ]]; then
+    DEFAULT_SPEC_TOKENS="${CFG_SPEC_TOKENS}"
+fi
+SPEC_TOKENS="${NCU_SPEC_TOKENS:-$DEFAULT_SPEC_TOKENS}"
+
 REP_FILE="${PROF_DIR}/kernels.ncu-rep"
 CSV_FILE="${PROF_DIR}/ncu_raw.csv"
 METRICS_JSON="${RES_DIR}/ncu_metrics.json"
 RUNNER_PY="${PROF_DIR}/_ncu_runner.py"
+trap 'rm -f "${RUNNER_PY}" "${CSV_FILE}"' EXIT
 
 echo "=========================================================="
 echo " Nsight Compute Kernel & Roofline Profiler"
 echo " Target Stage:   ${STAGE}"
-echo " Model:          ${MODEL_NAME} (${DTYPE})"
-echo " Workload:       Layer 0 | 1 Prefill (L=${PROF_IN}) + 1 Decode Step (C=1)"
+echo " Target Model:   ${MODEL_NAME} (${DTYPE})"
+if [[ "${SPEC_TOKENS}" -gt 0 ]]; then
+    echo " Draft Model:    ${DRAFT_MODEL} (K=${SPEC_TOKENS})"
+    echo " Workload:       Target Layer 0 | 1 Prefill (L=${PROF_IN}) + 1 Verify Step (M=$((SPEC_TOKENS + 1)), C=1)"
+else
+    echo " Workload:       Layer 0 | 1 Prefill (L=${PROF_IN}) + 1 Decode Step (M=1, C=1)"
+fi
+echo " Temperature:    ${TEMPERATURE}"
 echo " Profile Out:    ${PROF_DIR}"
 echo " Results JSON:   ${METRICS_JSON}"
 echo "=========================================================="
 
-# 3. Create single-process runner that profiles strictly Layer 0 (Pass 1 = Prefill, Pass 2 = Decode)
+# 3. Create single-process runner that profiles strictly Target Layer 0 (Pass 1 = Prefill, Pass 2 = Decode/Verify)
 cat << 'EOF' > "${RUNNER_PY}"
 import sys
 import torch
+import yaml
+from transformers import AutoTokenizer
 from vllm import LLM, SamplingParams
 
-model_name, dtype, max_len, gpu_mem, in_len = (
-    sys.argv[1], sys.argv[2], int(sys.argv[3]), float(sys.argv[4]), int(sys.argv[5])
+model_name, dtype, max_len, gpu_mem, in_len, draft_model, spec_tokens, temp = (
+    sys.argv[1],
+    sys.argv[2],
+    int(sys.argv[3]),
+    float(sys.argv[4]),
+    int(sys.argv[5]),
+    sys.argv[6],
+    int(sys.argv[7]),
+    float(sys.argv[8]),
 )
 
-llm = LLM(
+with open("config.yaml", "r", encoding="utf-8") as f:
+    cfg = yaml.safe_load(f)
+base_prompt = cfg["benchmarks"].get("prompt", "Write a Python module to benchmark matrix multiplication.").strip()
+
+tokenizer = AutoTokenizer.from_pretrained(model_name)
+base_ids = tokenizer.encode(base_prompt, add_special_tokens=False)
+reps = (in_len // max(1, len(base_ids))) + 2
+prompt_token_ids = (base_ids * reps)[:in_len]
+
+llm_kwargs = dict(
     model=model_name,
     dtype=dtype,
     max_model_len=max_len,
@@ -64,39 +100,63 @@ llm = LLM(
     enable_prefix_caching=False,
 )
 
-# Locate Layer 0 inside vLLM model runner
-driver_model = llm.llm_engine.model_executor.driver_worker.model_runner.model
+if spec_tokens > 0:
+    llm_kwargs["speculative_config"] = {
+        "method": "draft_model",
+        "model": draft_model,
+        "num_speculative_tokens": spec_tokens,
+    }
+
+llm = LLM(**llm_kwargs)
+
+# Locate Target Model Layer 0 across standard and speculative worker hierarchies
+worker = llm.llm_engine.model_executor.driver_worker
+if hasattr(worker, "model_runner") and hasattr(worker.model_runner, "model"):
+    driver_model = worker.model_runner.model
+elif hasattr(worker, "scorer_worker"):
+    driver_model = worker.scorer_worker.model_runner.model
+elif hasattr(worker, "target_worker"):
+    driver_model = worker.target_worker.model_runner.model
+else:
+    raise RuntimeError(f"Could not locate target model on worker: {type(worker)}")
+
 layer0 = None
 for name, mod in driver_model.named_modules():
     if name.endswith(".layers.0") or name == "layers.0":
         layer0 = mod
         break
 
-pass_counter = {"count": 0}
+pass_counter = {"count": 0, "active": False}
 
 def pre_hook(module, args):
-    phase = "Prefill" if pass_counter["count"] == 0 else "Decode"
-    torch.cuda.nvtx.range_push(phase)
-    torch.cuda.cudart().cudaProfilerStart()
+    if pass_counter["count"] < 2:
+        phase = "Prefill" if pass_counter["count"] == 0 else "Decode"
+        pass_counter["active"] = True
+        torch.cuda.nvtx.range_push(phase)
+        torch.cuda.cudart().cudaProfilerStart()
 
 def post_hook(module, args, output):
-    torch.cuda.cudart().cudaProfilerStop()
-    torch.cuda.nvtx.range_pop()
+    if pass_counter["active"]:
+        torch.cuda.cudart().cudaProfilerStop()
+        torch.cuda.nvtx.range_pop()
+        pass_counter["active"] = False
     pass_counter["count"] += 1
 
-# Unprofiled warmup
-warmup_params = SamplingParams(temperature=0.0, max_tokens=2, ignore_eos=True)
-llm.generate(["warmup " * 64], warmup_params, use_tqdm=False)
+# Ensure enough token budget so speculative decoding drafts the full K tokens on Pass 2
+gen_tokens = 2 + spec_tokens if spec_tokens > 0 else 2
 
-# Attach surgical hook to Layer 0
+# Unprofiled warmup
+warmup_params = SamplingParams(temperature=temp, max_tokens=gen_tokens, ignore_eos=True)
+llm.generate([{"prompt_token_ids": prompt_token_ids[:64]}], warmup_params, use_tqdm=False)
+
+# Attach surgical hook to Target Layer 0
 hooks = []
 if layer0 is not None:
     hooks.append(layer0.register_forward_pre_hook(pre_hook))
     hooks.append(layer0.register_forward_hook(post_hook))
 
-# Profiled run: max_tokens=2 triggers exactly 1 Prefill pass (count=0) and 1 Decode pass (count=1)
-prompt_token_ids = [100] * in_len
-prof_params = SamplingParams(temperature=0.0, max_tokens=2, ignore_eos=True)
+# Profiled run: captures strictly Pass 0 (Prefill, L=in_len) and Pass 1 (Decode/Verify, M=1 or K+1)
+prof_params = SamplingParams(temperature=temp, max_tokens=gen_tokens, ignore_eos=True)
 llm.generate([{"prompt_token_ids": prompt_token_ids}], prof_params, use_tqdm=False)
 
 for h in hooks:
@@ -128,7 +188,7 @@ VLLM_ENABLE_V1_MULTIPROCESSING=0 ncu \
     --metrics "${METRICS_ARG}" \
     --export "${REP_FILE}" \
     --force-overwrite \
-    uv run python3 "${RUNNER_PY}" "${MODEL_NAME}" "${DTYPE}" "${MAX_LEN}" "${GPU_MEM}" "${PROF_IN}"
+    uv run python3 "${RUNNER_PY}" "${MODEL_NAME}" "${DTYPE}" "${MAX_LEN}" "${GPU_MEM}" "${PROF_IN}" "${DRAFT_MODEL}" "${SPEC_TOKENS}" "${TEMPERATURE}"
 
 echo ">>> [2/3] Exporting raw counters to CSV..."
 ncu --import "${REP_FILE}" --csv --page raw > "${CSV_FILE}"

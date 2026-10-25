@@ -28,6 +28,7 @@ with open(sys.argv[1], "r", encoding="utf-8") as f:
 
 m = cfg.get("model", {})
 s = cfg.get("server", {})
+b = cfg.get("benchmarks", {})
 
 print(f'CFG_MODEL="{m.get("name", "Qwen/Qwen2.5-Coder-1.5B-Instruct")}"')
 print(f'CFG_DTYPE="{m.get("dtype", "bfloat16")}"')
@@ -36,6 +37,7 @@ print(f'CFG_HOST="{s.get("host", "0.0.0.0")}"')
 print(f'CFG_PORT="{s.get("port", 8000)}"')
 print(f'CFG_GPU_MEM="{s.get("gpu_memory_utilization", 0.70)}"')
 print(f'CFG_PREFIX_CACHE="{s.get("enable_prefix_caching", False)}"')
+print(f'CFG_TEMPERATURE="{b.get("temperature", 0.0)}"')
 EOF
 )"
 
@@ -47,6 +49,7 @@ DTYPE="${VLLM_DTYPE:-$CFG_DTYPE}"
 MAX_MODEL_LEN="${VLLM_MAX_MODEL_LEN:-$CFG_MAX_MODEL_LEN}"
 GPU_MEMORY_UTILIZATION="${VLLM_GPU_MEMORY_UTILIZATION:-$CFG_GPU_MEM}"
 PREFIX_CACHE="${VLLM_PREFIX_CACHE:-$CFG_PREFIX_CACHE}"
+TEMPERATURE="${VLLM_TEMPERATURE:-$CFG_TEMPERATURE}"
 
 # Build prefix caching flag based on resolved config
 PREFIX_CACHE_FLAG="--no-enable-prefix-caching"
@@ -54,13 +57,16 @@ if [[ "${PREFIX_CACHE}" == "True" || "${PREFIX_CACHE}" == "true" || "${PREFIX_CA
     PREFIX_CACHE_FLAG="--enable-prefix-caching"
 fi
 
-echo "Starting vLLM reference server"
+GEN_CONFIG=$(printf '{"temperature": %s}' "${TEMPERATURE}")
+
+echo "Starting vLLM reference server (Stage 0: Baseline)"
 echo "  Configuration file:  ${CONFIG_FILE}"
 echo "  Model:               ${MODEL}"
 echo "  Address:             ${HOST}:${PORT}"
 echo "  Dtype:               ${DTYPE}"
 echo "  Max model length:    ${MAX_MODEL_LEN}"
 echo "  GPU memory target:   ${GPU_MEMORY_UTILIZATION}"
+echo "  Default temperature: ${TEMPERATURE}"
 echo "  Prefix caching flag: ${PREFIX_CACHE_FLAG}"
 
 NSYS_CMD=()
@@ -75,4 +81,5 @@ exec "${NSYS_CMD[@]}" uv run vllm serve "${MODEL}" \
     --dtype "${DTYPE}" \
     --max-model-len "${MAX_MODEL_LEN}" \
     --gpu-memory-utilization "${GPU_MEMORY_UTILIZATION}" \
+    --override-generation-config "${GEN_CONFIG}" \
     "${PREFIX_CACHE_FLAG}"
