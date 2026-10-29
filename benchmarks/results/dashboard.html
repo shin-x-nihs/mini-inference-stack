@@ -44,8 +44,21 @@
             border-radius: 4px;
             padding: 12px;
         }
+        .plot4-header-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 8px;
+            padding: 6px 6px 10px 6px;
+        }
+        .plot4-title {
+            font-size: 17px;
+            color: #ffffff;
+            font-family: Inter, sans-serif;
+        }
 
-        /* --- Fix 1: Dropdown menu dark-grey hover & active state --- */
+        /* --- Plotly Dropdown dark-grey hover & active state --- */
         .js-plotly-plot .plotly .updatemenu-item-rect {
             fill: #1a1a1a !important;
             stroke: #333333 !important;
@@ -67,7 +80,7 @@
             fill: #ff2a2a !important;
         }
 
-        /* --- Fix 2: Pin modebar cleanly at top-right above dropdown --- */
+        /* --- Pin modebar cleanly at top-right above dropdown --- */
         .js-plotly-plot .plotly .modebar {
             top: 2px !important;
             right: 6px !important;
@@ -90,9 +103,66 @@
         .table-card { padding: 20px; overflow-x: auto; }
         .table-card h2 {
             font-size: 16px;
-            margin-bottom: 14px;
             color: #ffffff;
             letter-spacing: -0.01em;
+        }
+        .table-header-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 12px;
+            margin-bottom: 14px;
+        }
+        .filter-controls {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        .pill-group {
+            display: inline-flex;
+            background: #1a1a1a;
+            border: 1px solid #333333;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        .pill {
+            background: transparent;
+            color: #a0a0a0;
+            border: none;
+            padding: 6px 12px;
+            font-family: Inter, sans-serif;
+            font-size: 11.5px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.12s, color 0.12s;
+        }
+        .pill:hover {
+            background: #262626;
+            color: #ffffff;
+        }
+        .pill.active {
+            background: #ff2a2a;
+            color: #000000;
+        }
+        .dark-select {
+            background-color: #1a1a1a;
+            color: #ffffff;
+            border: 1px solid #ff2a2a;
+            border-radius: 4px;
+            padding: 5px 10px;
+            font-family: Inter, monospace;
+            font-size: 11.5px;
+            outline: none;
+            cursor: pointer;
+        }
+        .dark-select:hover {
+            background-color: #262626;
+        }
+        .dark-select option {
+            background-color: #1a1a1a;
+            color: #ffffff;
         }
         table {
             width: 100%;
@@ -115,7 +185,16 @@
             background-color: #171717;
         }
         tr:hover td { background-color: #191919; }
+        tr.group-start td { border-top: 2px solid #2e2e2e; }
         .stage-cell { font-weight: 700; color: #ffffff; }
+        .stage-dot {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 8px;
+            vertical-align: middle;
+        }
         .highlight-red { color: #ff2a2a; font-weight: 700; }
         .ai-cell { color: #ff7b54; font-weight: 600; }
         .sub { color: #777777; font-size: 11px; }
@@ -140,10 +219,27 @@
     </header>
 
     <div class="grid-2x2">
-        <div class="card"><div style="height:435px; width:100%;">                            <div id="0e0984a8-e29a-4c06-ba06-e1dd0074b9af" class="plotly-graph-div" style="height:100%; width:100%;"></div>            <script>                window.PLOTLYENV=window.PLOTLYENV || {};                                if (document.getElementById("0e0984a8-e29a-4c06-ba06-e1dd0074b9af")) {                    Plotly.newPlot(                        "0e0984a8-e29a-4c06-ba06-e1dd0074b9af",                        [{"hovertemplate":"\u003cb\u003e%{fullData.name}\u003c\u002fb\u003e (%{text})\u003cbr\u003eThroughput: %{x:.1f} tok\u002fs\u003cbr\u003eLatency: %{y:.2f} ms\u003cextra\u003e\u003c\u002fextra\u003e","line":{"color":"#ff2a2a","width":2.5},"marker":{"color":"#ff2a2a","line":{"color":"#121212","width":1},"size":8},"mode":"lines+markers+text","name":"stage-0-vllm","text":["C=1","C=2","C=4","C=8","C=16","C=32","C=64"],"textposition":"top center","x":[87.77396894670385,169.4566576184146,353.7412893678334,561.944818415881,831.1923115757804,966.9597530688334,1232.261758151937],"y":[14.523889490001231,15.104406509808532,16.326965129383137,32.11933191991195,142.73244445022098,239.18552432989594,258.95967753008335],"type":"scatter"},{"hovertemplate":"\u003cb\u003e%{fullData.name}\u003c\u002fb\u003e (%{text})\u003cbr\u003eThroughput: %{x:.1f} tok\u002fs\u003cbr\u003eLatency: %{y:.2f} ms\u003cextra\u003e\u003c\u002fextra\u003e","line":{"color":"#ffffff","width":2.5},"marker":{"color":"#ffffff","line":{"color":"#121212","width":1},"size":8},"mode":"lines+markers+text","name":"stage-1-vllm","text":["C=1","C=2","C=4","C=8","C=16","C=32","C=64"],"textposition":"top center","x":[105.96761907097317,182.17186881200286,275.8544602574303,448.34970075641576,622.8802180262612,755.4934330766459,872.4658280928885],"y":[69.08545352973306,76.54323662964998,84.97628350990438,279.0663440201297,336.0353722800572,360.8441678503368,392.6515568592549],"type":"scatter"}],                        {"font":{"color":"#a0a0a0","family":"Inter, monospace","size":12},"height":435,"hovermode":"closest","legend":{"bgcolor":"rgba(0,0,0,0)","font":{"color":"#ffffff","size":11},"orientation":"h","x":0.0,"xanchor":"left","y":1.02,"yanchor":"bottom"},"margin":{"b":55,"l":60,"r":30,"t":82},"paper_bgcolor":"#121212","plot_bgcolor":"#121212","title":{"font":{"color":"#ffffff","family":"Inter, sans-serif","size":17},"text":"Throughput vs. Latency (System Capacity)","x":0.01,"y":0.96},"xaxis":{"gridcolor":"#222222","linecolor":"#333333","title":{"font":{"color":"#ffffff"},"text":"System Throughput (tokens\u002fs)"},"zerolinecolor":"#222222","range":[0.0,1417.1010218747276]},"yaxis":{"gridcolor":"#222222","linecolor":"#333333","title":{"font":{"color":"#ffffff"},"text":"ITL P99 (ms)"},"zerolinecolor":"#222222","range":[0.0,451.5492903881431]},"template":{"data":{"histogram2dcontour":[{"type":"histogram2dcontour","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"choropleth":[{"type":"choropleth","colorbar":{"outlinewidth":0,"ticks":""}}],"histogram2d":[{"type":"histogram2d","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"heatmap":[{"type":"heatmap","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"contourcarpet":[{"type":"contourcarpet","colorbar":{"outlinewidth":0,"ticks":""}}],"contour":[{"type":"contour","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"surface":[{"type":"surface","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"mesh3d":[{"type":"mesh3d","colorbar":{"outlinewidth":0,"ticks":""}}],"scatter":[{"fillpattern":{"fillmode":"overlay","size":10,"solidity":0.2},"type":"scatter"}],"parcoords":[{"type":"parcoords","line":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatterpolargl":[{"type":"scatterpolargl","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"bar":[{"error_x":{"color":"#2a3f5f"},"error_y":{"color":"#2a3f5f"},"marker":{"line":{"color":"#E5ECF6","width":0.5},"pattern":{"fillmode":"overlay","size":10,"solidity":0.2}},"type":"bar"}],"scattergeo":[{"type":"scattergeo","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatterpolar":[{"type":"scatterpolar","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"histogram":[{"marker":{"pattern":{"fillmode":"overlay","size":10,"solidity":0.2}},"type":"histogram"}],"scattergl":[{"type":"scattergl","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatter3d":[{"type":"scatter3d","line":{"colorbar":{"outlinewidth":0,"ticks":""}},"marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scattermap":[{"type":"scattermap","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatterternary":[{"type":"scatterternary","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scattercarpet":[{"type":"scattercarpet","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"carpet":[{"aaxis":{"endlinecolor":"#2a3f5f","gridcolor":"white","linecolor":"white","minorgridcolor":"white","startlinecolor":"#2a3f5f"},"baxis":{"endlinecolor":"#2a3f5f","gridcolor":"white","linecolor":"white","minorgridcolor":"white","startlinecolor":"#2a3f5f"},"type":"carpet"}],"table":[{"cells":{"fill":{"color":"#EBF0F8"},"line":{"color":"white"}},"header":{"fill":{"color":"#C8D4E3"},"line":{"color":"white"}},"type":"table"}],"barpolar":[{"marker":{"line":{"color":"#E5ECF6","width":0.5},"pattern":{"fillmode":"overlay","size":10,"solidity":0.2}},"type":"barpolar"}],"pie":[{"automargin":true,"type":"pie"}]},"layout":{"autotypenumbers":"strict","colorway":["#636efa","#EF553B","#00cc96","#ab63fa","#FFA15A","#19d3f3","#FF6692","#B6E880","#FF97FF","#FECB52"],"font":{"color":"#2a3f5f"},"hovermode":"closest","hoverlabel":{"align":"left"},"paper_bgcolor":"white","plot_bgcolor":"#E5ECF6","polar":{"bgcolor":"#E5ECF6","angularaxis":{"gridcolor":"white","linecolor":"white","ticks":""},"radialaxis":{"gridcolor":"white","linecolor":"white","ticks":""}},"ternary":{"bgcolor":"#E5ECF6","aaxis":{"gridcolor":"white","linecolor":"white","ticks":""},"baxis":{"gridcolor":"white","linecolor":"white","ticks":""},"caxis":{"gridcolor":"white","linecolor":"white","ticks":""}},"coloraxis":{"colorbar":{"outlinewidth":0,"ticks":""}},"colorscale":{"sequential":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]],"sequentialminus":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]],"diverging":[[0,"#8e0152"],[0.1,"#c51b7d"],[0.2,"#de77ae"],[0.3,"#f1b6da"],[0.4,"#fde0ef"],[0.5,"#f7f7f7"],[0.6,"#e6f5d0"],[0.7,"#b8e186"],[0.8,"#7fbc41"],[0.9,"#4d9221"],[1,"#276419"]]},"xaxis":{"gridcolor":"white","linecolor":"white","ticks":"","title":{"standoff":15},"zerolinecolor":"white","automargin":true,"zerolinewidth":2},"yaxis":{"gridcolor":"white","linecolor":"white","ticks":"","title":{"standoff":15},"zerolinecolor":"white","automargin":true,"zerolinewidth":2},"scene":{"xaxis":{"backgroundcolor":"#E5ECF6","gridcolor":"white","linecolor":"white","showbackground":true,"ticks":"","zerolinecolor":"white","gridwidth":2},"yaxis":{"backgroundcolor":"#E5ECF6","gridcolor":"white","linecolor":"white","showbackground":true,"ticks":"","zerolinecolor":"white","gridwidth":2},"zaxis":{"backgroundcolor":"#E5ECF6","gridcolor":"white","linecolor":"white","showbackground":true,"ticks":"","zerolinecolor":"white","gridwidth":2}},"shapedefaults":{"line":{"color":"#2a3f5f"}},"annotationdefaults":{"arrowcolor":"#2a3f5f","arrowhead":0,"arrowwidth":1},"geo":{"bgcolor":"white","landcolor":"#E5ECF6","subunitcolor":"white","showland":true,"showlakes":true,"lakecolor":"white"},"title":{"x":0.05}}},"updatemenus":[{"bgcolor":"#1a1a1a","bordercolor":"#ff2a2a","borderwidth":1,"buttons":[{"args":[{"y":[[14.523889490001231,15.104406509808532,16.326965129383137,32.11933191991195,142.73244445022098,239.18552432989594,258.95967753008335],[69.08545352973306,76.54323662964998,84.97628350990438,279.0663440201297,336.0353722800572,360.8441678503368,392.6515568592549]]},{"yaxis.title.text":"ITL P99 (ms)","yaxis.range":[0.0,451.5492903881431]}],"label":"ITL P99 (ms)","method":"update"},{"args":[{"y":[[13.439764599479531,13.621880599475844,14.115609799955564,15.354158799982544,16.80641640059548,19.371510499695432,210.72114370026614],[58.41167149965259,61.65331649990549,63.63659610005926,78.32410769970018,214.7953364003115,353.0753845002437,384.9501814993346]]},{"yaxis.title.text":"ITL P90 (ms)","yaxis.range":[0.0,442.6927087242347]}],"label":"ITL P90 (ms)","method":"update"},{"args":[{"y":[[10.913666499618557,10.265408999657666,8.9998174998982,10.447724000187009,13.168494499950611,17.74117649983964,20.226364000336616],[42.86127300019871,46.110877499813796,52.06815600013215,58.1330270001672,72.6328740001918,101.45759350007211,371.3188070000797]]},{"yaxis.title.text":"ITL P50 (ms)","yaxis.range":[0.0,427.0166280500916]}],"label":"ITL P50 (ms)","method":"update"},{"args":[{"y":[[10.90265937322701,10.982038580314972,10.15439143720457,12.265314847539456,16.076444775295005,27.86471076582181,45.147547469500466],[8.380008423622225,9.057614635826319,11.282420433464157,14.267482608366254,20.427863149754195,33.7717003817667,59.0583548609126]]},{"yaxis.title.text":"TPOT Mean (ms\u002ftoken)","yaxis.range":[0.0,67.91710809004948]}],"label":"TPOT Mean (ms\u002ftoken)","method":"update"}],"direction":"down","font":{"color":"#ffffff","size":11},"type":"dropdown","x":1.0,"xanchor":"right","y":1.11,"yanchor":"top"}]},                        {"responsive": true, "displaylogo": false, "modeBarButtonsToRemove": ["select2d", "lasso2d"]}                    )                };            </script>        </div></div>
-        <div class="card"><div style="height:435px; width:100%;">                            <div id="fa6f8eb0-c29e-408f-a0da-e70237f387e3" class="plotly-graph-div" style="height:100%; width:100%;"></div>            <script>                window.PLOTLYENV=window.PLOTLYENV || {};                                if (document.getElementById("fa6f8eb0-c29e-408f-a0da-e70237f387e3")) {                    Plotly.newPlot(                        "fa6f8eb0-c29e-408f-a0da-e70237f387e3",                        [{"hovertemplate":"\u003cb\u003e%{fullData.name}\u003c\u002fb\u003e\u003cbr\u003ePrompt: %{x} tok\u003cbr\u003eTTFT: %{y:.2f} ms\u003cextra\u003e\u003c\u002fextra\u003e","line":{"color":"#ff2a2a","width":2.5},"marker":{"color":"#ff2a2a","size":8},"mode":"lines+markers","name":"stage-0-vllm","x":[128,256,512,1024,2048,4096,8192],"y":[46.33664399971167,56.50280020008722,79.54942089982069,105.47155630001726,208.13904359993103,416.4650294997955,673.6648645001878],"type":"scatter"},{"hovertemplate":"\u003cb\u003e%{fullData.name}\u003c\u002fb\u003e\u003cbr\u003ePrompt: %{x} tok\u003cbr\u003eTTFT: %{y:.2f} ms\u003cextra\u003e\u003c\u002fextra\u003e","line":{"color":"#ffffff","width":2.5},"marker":{"color":"#ffffff","size":8},"mode":"lines+markers","name":"stage-1-vllm","x":[128,256,512,1024,2048,4096,8192],"y":[125.28488460029621,142.1445528001641,174.48974680009997,261.66443080001045,411.56177800003206,755.3572327997244,1752.662436099854],"type":"scatter"}],                        {"font":{"color":"#a0a0a0","family":"Inter, monospace","size":12},"height":435,"hovermode":"closest","legend":{"bgcolor":"rgba(0,0,0,0)","font":{"color":"#ffffff","size":11},"orientation":"h","x":0.0,"xanchor":"left","y":1.02,"yanchor":"bottom"},"margin":{"b":55,"l":60,"r":30,"t":82},"paper_bgcolor":"#121212","plot_bgcolor":"#121212","title":{"font":{"color":"#ffffff","family":"Inter, sans-serif","size":17},"text":"Prompt Size vs. Time to First Token","x":0.01,"y":0.96},"xaxis":{"gridcolor":"#222222","linecolor":"#333333","title":{"font":{"color":"#ffffff"},"text":"Input Prompt Length (tokens)"},"zerolinecolor":"#222222","range":[0,8847.36]},"yaxis":{"gridcolor":"#222222","linecolor":"#333333","title":{"font":{"color":"#ffffff"},"text":"Time to First Token - TTFT (ms)"},"zerolinecolor":"#222222","range":[0.0,2015.5618015148318]},"template":{"data":{"histogram2dcontour":[{"type":"histogram2dcontour","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"choropleth":[{"type":"choropleth","colorbar":{"outlinewidth":0,"ticks":""}}],"histogram2d":[{"type":"histogram2d","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"heatmap":[{"type":"heatmap","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"contourcarpet":[{"type":"contourcarpet","colorbar":{"outlinewidth":0,"ticks":""}}],"contour":[{"type":"contour","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"surface":[{"type":"surface","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"mesh3d":[{"type":"mesh3d","colorbar":{"outlinewidth":0,"ticks":""}}],"scatter":[{"fillpattern":{"fillmode":"overlay","size":10,"solidity":0.2},"type":"scatter"}],"parcoords":[{"type":"parcoords","line":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatterpolargl":[{"type":"scatterpolargl","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"bar":[{"error_x":{"color":"#2a3f5f"},"error_y":{"color":"#2a3f5f"},"marker":{"line":{"color":"#E5ECF6","width":0.5},"pattern":{"fillmode":"overlay","size":10,"solidity":0.2}},"type":"bar"}],"scattergeo":[{"type":"scattergeo","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatterpolar":[{"type":"scatterpolar","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"histogram":[{"marker":{"pattern":{"fillmode":"overlay","size":10,"solidity":0.2}},"type":"histogram"}],"scattergl":[{"type":"scattergl","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatter3d":[{"type":"scatter3d","line":{"colorbar":{"outlinewidth":0,"ticks":""}},"marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scattermap":[{"type":"scattermap","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatterternary":[{"type":"scatterternary","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scattercarpet":[{"type":"scattercarpet","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"carpet":[{"aaxis":{"endlinecolor":"#2a3f5f","gridcolor":"white","linecolor":"white","minorgridcolor":"white","startlinecolor":"#2a3f5f"},"baxis":{"endlinecolor":"#2a3f5f","gridcolor":"white","linecolor":"white","minorgridcolor":"white","startlinecolor":"#2a3f5f"},"type":"carpet"}],"table":[{"cells":{"fill":{"color":"#EBF0F8"},"line":{"color":"white"}},"header":{"fill":{"color":"#C8D4E3"},"line":{"color":"white"}},"type":"table"}],"barpolar":[{"marker":{"line":{"color":"#E5ECF6","width":0.5},"pattern":{"fillmode":"overlay","size":10,"solidity":0.2}},"type":"barpolar"}],"pie":[{"automargin":true,"type":"pie"}]},"layout":{"autotypenumbers":"strict","colorway":["#636efa","#EF553B","#00cc96","#ab63fa","#FFA15A","#19d3f3","#FF6692","#B6E880","#FF97FF","#FECB52"],"font":{"color":"#2a3f5f"},"hovermode":"closest","hoverlabel":{"align":"left"},"paper_bgcolor":"white","plot_bgcolor":"#E5ECF6","polar":{"bgcolor":"#E5ECF6","angularaxis":{"gridcolor":"white","linecolor":"white","ticks":""},"radialaxis":{"gridcolor":"white","linecolor":"white","ticks":""}},"ternary":{"bgcolor":"#E5ECF6","aaxis":{"gridcolor":"white","linecolor":"white","ticks":""},"baxis":{"gridcolor":"white","linecolor":"white","ticks":""},"caxis":{"gridcolor":"white","linecolor":"white","ticks":""}},"coloraxis":{"colorbar":{"outlinewidth":0,"ticks":""}},"colorscale":{"sequential":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]],"sequentialminus":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]],"diverging":[[0,"#8e0152"],[0.1,"#c51b7d"],[0.2,"#de77ae"],[0.3,"#f1b6da"],[0.4,"#fde0ef"],[0.5,"#f7f7f7"],[0.6,"#e6f5d0"],[0.7,"#b8e186"],[0.8,"#7fbc41"],[0.9,"#4d9221"],[1,"#276419"]]},"xaxis":{"gridcolor":"white","linecolor":"white","ticks":"","title":{"standoff":15},"zerolinecolor":"white","automargin":true,"zerolinewidth":2},"yaxis":{"gridcolor":"white","linecolor":"white","ticks":"","title":{"standoff":15},"zerolinecolor":"white","automargin":true,"zerolinewidth":2},"scene":{"xaxis":{"backgroundcolor":"#E5ECF6","gridcolor":"white","linecolor":"white","showbackground":true,"ticks":"","zerolinecolor":"white","gridwidth":2},"yaxis":{"backgroundcolor":"#E5ECF6","gridcolor":"white","linecolor":"white","showbackground":true,"ticks":"","zerolinecolor":"white","gridwidth":2},"zaxis":{"backgroundcolor":"#E5ECF6","gridcolor":"white","linecolor":"white","showbackground":true,"ticks":"","zerolinecolor":"white","gridwidth":2}},"shapedefaults":{"line":{"color":"#2a3f5f"}},"annotationdefaults":{"arrowcolor":"#2a3f5f","arrowhead":0,"arrowwidth":1},"geo":{"bgcolor":"white","landcolor":"#E5ECF6","subunitcolor":"white","showland":true,"showlakes":true,"lakecolor":"white"},"title":{"x":0.05}}}},                        {"responsive": true, "displaylogo": false, "modeBarButtonsToRemove": ["select2d", "lasso2d"]}                    )                };            </script>        </div></div>
-        <div class="card"><div style="height:435px; width:100%;">                            <div id="022e318c-c7ac-4ed6-bbe0-ba0bfa8e1ffe" class="plotly-graph-div" style="height:100%; width:100%;"></div>            <script>                window.PLOTLYENV=window.PLOTLYENV || {};                                if (document.getElementById("022e318c-c7ac-4ed6-bbe0-ba0bfa8e1ffe")) {                    Plotly.newPlot(                        "022e318c-c7ac-4ed6-bbe0-ba0bfa8e1ffe",                        [{"hovertemplate":"\u003cb\u003e%{fullData.name}\u003c\u002fb\u003e\u003cbr\u003eContext: %{x} tok\u003cbr\u003eValue: %{y:.2f}\u003cextra\u003e\u003c\u002fextra\u003e","line":{"color":"#ff2a2a","width":2.5},"marker":{"color":"#ff2a2a","size":8},"mode":"lines+markers","name":"stage-0-vllm","x":[128,256,512,1024,2048,4096,8192],"y":[10.667886906350528,10.751076912702192,10.093991552382667,8.987135022222887,10.113785109522375,10.407473012700002,9.239642087298321],"type":"scatter"},{"hovertemplate":"\u003cb\u003e%{fullData.name}\u003c\u002fb\u003e\u003cbr\u003eContext: %{x} tok\u003cbr\u003eValue: %{y:.2f}\u003cextra\u003e\u003c\u002fextra\u003e","line":{"color":"#ffffff","width":2.5},"marker":{"color":"#ffffff","size":8},"mode":"lines+markers","name":"stage-1-vllm","x":[128,256,512,1024,2048,4096,8192],"y":[12.116301266663262,7.980571699997763,8.146176719044831,8.70372903015763,10.57947607777827,10.16121172381515,13.429417174599607],"type":"scatter"}],                        {"font":{"color":"#a0a0a0","family":"Inter, monospace","size":12},"height":435,"hovermode":"closest","legend":{"bgcolor":"rgba(0,0,0,0)","font":{"color":"#ffffff","size":11},"orientation":"h","x":0.0,"xanchor":"left","y":1.02,"yanchor":"bottom"},"margin":{"b":55,"l":60,"r":30,"t":82},"paper_bgcolor":"#121212","plot_bgcolor":"#121212","title":{"font":{"color":"#ffffff","family":"Inter, sans-serif","size":17},"text":"Context Length vs. Generation Speed","x":0.01,"y":0.96},"xaxis":{"gridcolor":"#222222","linecolor":"#333333","title":{"font":{"color":"#ffffff"},"text":"Context Sequence Length (tokens)"},"zerolinecolor":"#222222","range":[0,8847.36]},"yaxis":{"gridcolor":"#222222","linecolor":"#333333","title":{"font":{"color":"#ffffff"},"text":"TPOT (ms\u002ftoken)"},"zerolinecolor":"#222222","range":[0.0,15.443829750789547]},"template":{"data":{"histogram2dcontour":[{"type":"histogram2dcontour","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"choropleth":[{"type":"choropleth","colorbar":{"outlinewidth":0,"ticks":""}}],"histogram2d":[{"type":"histogram2d","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"heatmap":[{"type":"heatmap","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"contourcarpet":[{"type":"contourcarpet","colorbar":{"outlinewidth":0,"ticks":""}}],"contour":[{"type":"contour","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"surface":[{"type":"surface","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"mesh3d":[{"type":"mesh3d","colorbar":{"outlinewidth":0,"ticks":""}}],"scatter":[{"fillpattern":{"fillmode":"overlay","size":10,"solidity":0.2},"type":"scatter"}],"parcoords":[{"type":"parcoords","line":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatterpolargl":[{"type":"scatterpolargl","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"bar":[{"error_x":{"color":"#2a3f5f"},"error_y":{"color":"#2a3f5f"},"marker":{"line":{"color":"#E5ECF6","width":0.5},"pattern":{"fillmode":"overlay","size":10,"solidity":0.2}},"type":"bar"}],"scattergeo":[{"type":"scattergeo","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatterpolar":[{"type":"scatterpolar","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"histogram":[{"marker":{"pattern":{"fillmode":"overlay","size":10,"solidity":0.2}},"type":"histogram"}],"scattergl":[{"type":"scattergl","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatter3d":[{"type":"scatter3d","line":{"colorbar":{"outlinewidth":0,"ticks":""}},"marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scattermap":[{"type":"scattermap","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatterternary":[{"type":"scatterternary","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scattercarpet":[{"type":"scattercarpet","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"carpet":[{"aaxis":{"endlinecolor":"#2a3f5f","gridcolor":"white","linecolor":"white","minorgridcolor":"white","startlinecolor":"#2a3f5f"},"baxis":{"endlinecolor":"#2a3f5f","gridcolor":"white","linecolor":"white","minorgridcolor":"white","startlinecolor":"#2a3f5f"},"type":"carpet"}],"table":[{"cells":{"fill":{"color":"#EBF0F8"},"line":{"color":"white"}},"header":{"fill":{"color":"#C8D4E3"},"line":{"color":"white"}},"type":"table"}],"barpolar":[{"marker":{"line":{"color":"#E5ECF6","width":0.5},"pattern":{"fillmode":"overlay","size":10,"solidity":0.2}},"type":"barpolar"}],"pie":[{"automargin":true,"type":"pie"}]},"layout":{"autotypenumbers":"strict","colorway":["#636efa","#EF553B","#00cc96","#ab63fa","#FFA15A","#19d3f3","#FF6692","#B6E880","#FF97FF","#FECB52"],"font":{"color":"#2a3f5f"},"hovermode":"closest","hoverlabel":{"align":"left"},"paper_bgcolor":"white","plot_bgcolor":"#E5ECF6","polar":{"bgcolor":"#E5ECF6","angularaxis":{"gridcolor":"white","linecolor":"white","ticks":""},"radialaxis":{"gridcolor":"white","linecolor":"white","ticks":""}},"ternary":{"bgcolor":"#E5ECF6","aaxis":{"gridcolor":"white","linecolor":"white","ticks":""},"baxis":{"gridcolor":"white","linecolor":"white","ticks":""},"caxis":{"gridcolor":"white","linecolor":"white","ticks":""}},"coloraxis":{"colorbar":{"outlinewidth":0,"ticks":""}},"colorscale":{"sequential":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]],"sequentialminus":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]],"diverging":[[0,"#8e0152"],[0.1,"#c51b7d"],[0.2,"#de77ae"],[0.3,"#f1b6da"],[0.4,"#fde0ef"],[0.5,"#f7f7f7"],[0.6,"#e6f5d0"],[0.7,"#b8e186"],[0.8,"#7fbc41"],[0.9,"#4d9221"],[1,"#276419"]]},"xaxis":{"gridcolor":"white","linecolor":"white","ticks":"","title":{"standoff":15},"zerolinecolor":"white","automargin":true,"zerolinewidth":2},"yaxis":{"gridcolor":"white","linecolor":"white","ticks":"","title":{"standoff":15},"zerolinecolor":"white","automargin":true,"zerolinewidth":2},"scene":{"xaxis":{"backgroundcolor":"#E5ECF6","gridcolor":"white","linecolor":"white","showbackground":true,"ticks":"","zerolinecolor":"white","gridwidth":2},"yaxis":{"backgroundcolor":"#E5ECF6","gridcolor":"white","linecolor":"white","showbackground":true,"ticks":"","zerolinecolor":"white","gridwidth":2},"zaxis":{"backgroundcolor":"#E5ECF6","gridcolor":"white","linecolor":"white","showbackground":true,"ticks":"","zerolinecolor":"white","gridwidth":2}},"shapedefaults":{"line":{"color":"#2a3f5f"}},"annotationdefaults":{"arrowcolor":"#2a3f5f","arrowhead":0,"arrowwidth":1},"geo":{"bgcolor":"white","landcolor":"#E5ECF6","subunitcolor":"white","showland":true,"showlakes":true,"lakecolor":"white"},"title":{"x":0.05}}},"updatemenus":[{"bgcolor":"#1a1a1a","bordercolor":"#ff2a2a","borderwidth":1,"buttons":[{"args":[{"y":[[10.667886906350528,10.751076912702192,10.093991552382667,8.987135022222887,10.113785109522375,10.407473012700002,9.239642087298321],[12.116301266663262,7.980571699997763,8.146176719044831,8.70372903015763,10.57947607777827,10.16121172381515,13.429417174599607]]},{"yaxis.title.text":"TPOT (ms\u002ftoken)","yaxis.range":[0.0,15.443829750789547]}],"label":"TPOT (ms\u002ftoken)","method":"update"},{"args":[{"y":[[93.73927646389896,93.01393787058849,99.06883662528448,111.27016535606238,98.87495029516452,96.0848035617986,108.22930050230991],[82.53343805104909,125.30430620656917,122.75697354589843,114.89328269929945,94.52263917874501,98.41345965228426,74.46339532078872]]},{"yaxis.title.text":"Generation Speed (tokens\u002fs\u002freq)","yaxis.range":[0.0,144.09995213755454]}],"label":"Generation Speed (tokens\u002fs\u002freq)","method":"update"}],"direction":"down","font":{"color":"#ffffff","size":11},"type":"dropdown","x":1.0,"xanchor":"right","y":1.11,"yanchor":"top"}]},                        {"responsive": true, "displaylogo": false, "modeBarButtonsToRemove": ["select2d", "lasso2d"]}                    )                };            </script>        </div></div>
-        <div class="card"><div style="height:435px; width:100%;">                            <div id="b4d0d449-51dc-4627-811e-d24e75a65af6" class="plotly-graph-div" style="height:100%; width:100%;"></div>            <script>                window.PLOTLYENV=window.PLOTLYENV || {};                                if (document.getElementById("b4d0d449-51dc-4627-811e-d24e75a65af6")) {                    Plotly.newPlot(                        "b4d0d449-51dc-4627-811e-d24e75a65af6",                        [{"hoverinfo":"skip","line":{"color":"#ff2a2a","dash":"dash","width":2},"mode":"lines","name":"Hardware Ceiling (512 GB\u002fs | 100 TFLOP\u002fs)","x":[0.02,195.3125,4096.0],"y":[0.01024,100.0,100.0],"type":"scatter"},{"customdata":[["Prefill",45.41,277.54],["Prefill",4125.15,28.21],["Prefill",54.82,143.86],["Prefill",28.03,76.15],["Prefill",732.58,11.55],["Prefill",246.37,343.14],["Decode",7.01,3.73],["Decode",177.7,321.1],["Decode",7.2,1.24],["Decode",26.02,82.87],["Decode",21.63,5.89],["Decode",9.63,4.68]],"hovertemplate":"\u003cb\u003e%{text}\u003c\u002fb\u003e (%{fullData.name} - %{customdata[0]})\u003cbr\u003eAI: %{x:.2f} FLOP\u002fB\u003cbr\u003ePerf: %{y:.3f} TFLOP\u002fs\u003cbr\u003eDRAM: %{customdata[2]:.1f} GB\u002fs\u003cbr\u003eDuration: %{customdata[1]:.2f} us\u003cextra\u003e\u003c\u002fextra\u003e","marker":{"color":"#ff2a2a","line":{"color":"#000000","width":1.5},"size":10,"symbol":["diamond","diamond","diamond","diamond","diamond","diamond","circle","circle","circle","circle","circle","circle"]},"mode":"markers+text","name":"stage-0-vllm","text":["Prefill Fused RMSNorm","Prefill Linear GEMM","Prefill RoPE Embedding","Prefill void vllm::reshape_and_cache","Prefill Attention (FlashDecode\u002fSplitKV)","Prefill SwiGLU Activation","Decode Fused RMSNorm","Decode Linear GEMV","Decode RoPE Embedding","Decode Attention (FlashDecode\u002fSplitKV)","Decode Attention Combine (Split-K)","Decode SwiGLU Activation"],"textfont":{"color":"#a0a0a0","size":10},"textposition":"top center","x":[1.658,969.482,1.729,0.982,1631.024,5.644,0.295,1.001,0.743,66.669,0.497,5.17],"y":[0.46,27.348,0.249,0.075,18.838,1.937,0.001,0.321,0.001,5.525,0.003,0.024],"type":"scatter"},{"customdata":[["Prefill",45.18,278.91],["Prefill",4184.22,28.06],["Prefill",54.37,145.05],["Prefill",29.92,71.36],["Prefill",739.65,11.45],["Prefill",240.26,344.19],["Decode",7.46,7.59],["Decode",174.91,325.56],["Decode",7.14,3.95],["Decode",7.97,3.47],["Decode",205.25,10.69],["Decode",9.12,24.53]],"hovertemplate":"\u003cb\u003e%{text}\u003c\u002fb\u003e (%{fullData.name} - %{customdata[0]})\u003cbr\u003eAI: %{x:.2f} FLOP\u002fB\u003cbr\u003ePerf: %{y:.3f} TFLOP\u002fs\u003cbr\u003eDRAM: %{customdata[2]:.1f} GB\u002fs\u003cbr\u003eDuration: %{customdata[1]:.2f} us\u003cextra\u003e\u003c\u002fextra\u003e","marker":{"color":"#ffffff","line":{"color":"#000000","width":1.5},"size":10,"symbol":["diamond","diamond","diamond","diamond","diamond","diamond","circle","circle","circle","circle","circle","circle"]},"mode":"markers+text","name":"stage-1-vllm","text":["Prefill Fused RMSNorm","Prefill Linear GEMM","Prefill RoPE Embedding","Prefill void vllm::reshape_and_cache","Prefill Attention (FlashDecode\u002fSplitKV)","Prefill SwiGLU Activation","Decode Fused RMSNorm","Decode Linear GEMM","Decode RoPE Embedding","Decode void vllm::reshape_and_cache","Decode Attention (FlashDecode\u002fSplitKV)","Decode SwiGLU Activation"],"textfont":{"color":"#a0a0a0","size":10},"textposition":"top center","x":[1.658,960.813,1.729,0.982,1629.25,5.769,1.576,15.473,1.418,0.222,392.964,6.247],"y":[0.462,26.962,0.251,0.07,18.658,1.986,0.012,5.037,0.006,0.001,4.202,0.153],"type":"scatter"}],                        {"font":{"color":"#a0a0a0","family":"Inter, monospace","size":12},"height":435,"hovermode":"closest","legend":{"bgcolor":"rgba(0,0,0,0)","font":{"color":"#ffffff","size":11},"orientation":"h","x":0.0,"xanchor":"left","y":1.02,"yanchor":"bottom"},"margin":{"b":55,"l":60,"r":30,"t":82},"paper_bgcolor":"#121212","plot_bgcolor":"#121212","title":{"font":{"color":"#ffffff","family":"Inter, sans-serif","size":17},"text":"Hardware Roofline (Compute vs. Memory)","x":0.01,"y":0.96},"xaxis":{"gridcolor":"#222222","linecolor":"#333333","title":{"font":{"color":"#ffffff"},"text":"Arithmetic Intensity (FLOP\u002fByte)"},"zerolinecolor":"#222222","type":"log","range":[-1.6989700043360187,3.612359947967774]},"yaxis":{"gridcolor":"#222222","linecolor":"#333333","title":{"font":{"color":"#ffffff"},"text":"Attained Performance (TFLOP\u002fs)"},"zerolinecolor":"#222222","type":"log","range":[-3.3979400086720375,2.255272505103306]},"template":{"data":{"histogram2dcontour":[{"type":"histogram2dcontour","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"choropleth":[{"type":"choropleth","colorbar":{"outlinewidth":0,"ticks":""}}],"histogram2d":[{"type":"histogram2d","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"heatmap":[{"type":"heatmap","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"contourcarpet":[{"type":"contourcarpet","colorbar":{"outlinewidth":0,"ticks":""}}],"contour":[{"type":"contour","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"surface":[{"type":"surface","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"mesh3d":[{"type":"mesh3d","colorbar":{"outlinewidth":0,"ticks":""}}],"scatter":[{"fillpattern":{"fillmode":"overlay","size":10,"solidity":0.2},"type":"scatter"}],"parcoords":[{"type":"parcoords","line":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatterpolargl":[{"type":"scatterpolargl","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"bar":[{"error_x":{"color":"#2a3f5f"},"error_y":{"color":"#2a3f5f"},"marker":{"line":{"color":"#E5ECF6","width":0.5},"pattern":{"fillmode":"overlay","size":10,"solidity":0.2}},"type":"bar"}],"scattergeo":[{"type":"scattergeo","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatterpolar":[{"type":"scatterpolar","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"histogram":[{"marker":{"pattern":{"fillmode":"overlay","size":10,"solidity":0.2}},"type":"histogram"}],"scattergl":[{"type":"scattergl","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatter3d":[{"type":"scatter3d","line":{"colorbar":{"outlinewidth":0,"ticks":""}},"marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scattermap":[{"type":"scattermap","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatterternary":[{"type":"scatterternary","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scattercarpet":[{"type":"scattercarpet","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"carpet":[{"aaxis":{"endlinecolor":"#2a3f5f","gridcolor":"white","linecolor":"white","minorgridcolor":"white","startlinecolor":"#2a3f5f"},"baxis":{"endlinecolor":"#2a3f5f","gridcolor":"white","linecolor":"white","minorgridcolor":"white","startlinecolor":"#2a3f5f"},"type":"carpet"}],"table":[{"cells":{"fill":{"color":"#EBF0F8"},"line":{"color":"white"}},"header":{"fill":{"color":"#C8D4E3"},"line":{"color":"white"}},"type":"table"}],"barpolar":[{"marker":{"line":{"color":"#E5ECF6","width":0.5},"pattern":{"fillmode":"overlay","size":10,"solidity":0.2}},"type":"barpolar"}],"pie":[{"automargin":true,"type":"pie"}]},"layout":{"autotypenumbers":"strict","colorway":["#636efa","#EF553B","#00cc96","#ab63fa","#FFA15A","#19d3f3","#FF6692","#B6E880","#FF97FF","#FECB52"],"font":{"color":"#2a3f5f"},"hovermode":"closest","hoverlabel":{"align":"left"},"paper_bgcolor":"white","plot_bgcolor":"#E5ECF6","polar":{"bgcolor":"#E5ECF6","angularaxis":{"gridcolor":"white","linecolor":"white","ticks":""},"radialaxis":{"gridcolor":"white","linecolor":"white","ticks":""}},"ternary":{"bgcolor":"#E5ECF6","aaxis":{"gridcolor":"white","linecolor":"white","ticks":""},"baxis":{"gridcolor":"white","linecolor":"white","ticks":""},"caxis":{"gridcolor":"white","linecolor":"white","ticks":""}},"coloraxis":{"colorbar":{"outlinewidth":0,"ticks":""}},"colorscale":{"sequential":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]],"sequentialminus":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]],"diverging":[[0,"#8e0152"],[0.1,"#c51b7d"],[0.2,"#de77ae"],[0.3,"#f1b6da"],[0.4,"#fde0ef"],[0.5,"#f7f7f7"],[0.6,"#e6f5d0"],[0.7,"#b8e186"],[0.8,"#7fbc41"],[0.9,"#4d9221"],[1,"#276419"]]},"xaxis":{"gridcolor":"white","linecolor":"white","ticks":"","title":{"standoff":15},"zerolinecolor":"white","automargin":true,"zerolinewidth":2},"yaxis":{"gridcolor":"white","linecolor":"white","ticks":"","title":{"standoff":15},"zerolinecolor":"white","automargin":true,"zerolinewidth":2},"scene":{"xaxis":{"backgroundcolor":"#E5ECF6","gridcolor":"white","linecolor":"white","showbackground":true,"ticks":"","zerolinecolor":"white","gridwidth":2},"yaxis":{"backgroundcolor":"#E5ECF6","gridcolor":"white","linecolor":"white","showbackground":true,"ticks":"","zerolinecolor":"white","gridwidth":2},"zaxis":{"backgroundcolor":"#E5ECF6","gridcolor":"white","linecolor":"white","showbackground":true,"ticks":"","zerolinecolor":"white","gridwidth":2}},"shapedefaults":{"line":{"color":"#2a3f5f"}},"annotationdefaults":{"arrowcolor":"#2a3f5f","arrowhead":0,"arrowwidth":1},"geo":{"bgcolor":"white","landcolor":"#E5ECF6","subunitcolor":"white","showland":true,"showlakes":true,"lakecolor":"white"},"title":{"x":0.05}}}},                        {"responsive": true, "displaylogo": false, "modeBarButtonsToRemove": ["select2d", "lasso2d"]}                    )                };            </script>        </div></div>
+        <div class="card"><div style="height:435px; width:100%;">                            <div id="0805e5e4-07c4-4bba-85ea-dd84974a38b3" class="plotly-graph-div" style="height:100%; width:100%;"></div>            <script>                window.PLOTLYENV=window.PLOTLYENV || {};                                if (document.getElementById("0805e5e4-07c4-4bba-85ea-dd84974a38b3")) {                    Plotly.newPlot(                        "0805e5e4-07c4-4bba-85ea-dd84974a38b3",                        [{"hovertemplate":"\u003cb\u003e%{fullData.name}\u003c\u002fb\u003e (%{text})\u003cbr\u003eThroughput: %{x:.1f} tok\u002fs\u003cbr\u003eLatency: %{y:.2f} ms\u003cextra\u003e\u003c\u002fextra\u003e","line":{"color":"#ff2a2a","width":2.5},"marker":{"color":"#ff2a2a","line":{"color":"#121212","width":1},"size":8},"mode":"lines+markers+text","name":"stage-0-vllm","text":["C=1","C=2","C=4","C=8","C=16","C=32","C=64"],"textposition":"top center","x":[87.77396894670385,169.4566576184146,353.7412893678334,561.944818415881,831.1923115757804,966.9597530688334,1232.261758151937],"y":[14.523889490001231,15.104406509808532,16.326965129383137,32.11933191991195,142.73244445022098,239.18552432989594,258.95967753008335],"type":"scatter"},{"hovertemplate":"\u003cb\u003e%{fullData.name}\u003c\u002fb\u003e (%{text})\u003cbr\u003eThroughput: %{x:.1f} tok\u002fs\u003cbr\u003eLatency: %{y:.2f} ms\u003cextra\u003e\u003c\u002fextra\u003e","line":{"color":"#ffffff","width":2.5},"marker":{"color":"#ffffff","line":{"color":"#121212","width":1},"size":8},"mode":"lines+markers+text","name":"stage-1-vllm","text":["C=1","C=2","C=4","C=8","C=16","C=32","C=64"],"textposition":"top center","x":[105.96761907097317,182.17186881200286,275.8544602574303,448.34970075641576,622.8802180262612,755.4934330766459,872.4658280928885],"y":[69.08545352973306,76.54323662964998,84.97628350990438,279.0663440201297,336.0353722800572,360.8441678503368,392.6515568592549],"type":"scatter"}],                        {"font":{"color":"#a0a0a0","family":"Inter, monospace","size":12},"height":435,"hovermode":"closest","legend":{"bgcolor":"rgba(0,0,0,0)","font":{"color":"#ffffff","size":11},"orientation":"h","x":0.0,"xanchor":"left","y":1.02,"yanchor":"bottom"},"margin":{"b":55,"l":60,"r":30,"t":82},"paper_bgcolor":"#121212","plot_bgcolor":"#121212","title":{"font":{"color":"#ffffff","family":"Inter, sans-serif","size":17},"text":"Throughput vs. Latency (System Capacity)","x":0.01,"y":0.96},"xaxis":{"gridcolor":"#222222","linecolor":"#333333","title":{"font":{"color":"#ffffff"},"text":"System Throughput (tokens\u002fs)"},"zerolinecolor":"#222222","range":[0.0,1417.1010218747276]},"yaxis":{"gridcolor":"#222222","linecolor":"#333333","title":{"font":{"color":"#ffffff"},"text":"ITL P99 (ms)"},"zerolinecolor":"#222222","range":[0.0,451.5492903881431]},"template":{"data":{"histogram2dcontour":[{"type":"histogram2dcontour","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"choropleth":[{"type":"choropleth","colorbar":{"outlinewidth":0,"ticks":""}}],"histogram2d":[{"type":"histogram2d","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"heatmap":[{"type":"heatmap","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"contourcarpet":[{"type":"contourcarpet","colorbar":{"outlinewidth":0,"ticks":""}}],"contour":[{"type":"contour","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"surface":[{"type":"surface","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"mesh3d":[{"type":"mesh3d","colorbar":{"outlinewidth":0,"ticks":""}}],"scatter":[{"fillpattern":{"fillmode":"overlay","size":10,"solidity":0.2},"type":"scatter"}],"parcoords":[{"type":"parcoords","line":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatterpolargl":[{"type":"scatterpolargl","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"bar":[{"error_x":{"color":"#2a3f5f"},"error_y":{"color":"#2a3f5f"},"marker":{"line":{"color":"#E5ECF6","width":0.5},"pattern":{"fillmode":"overlay","size":10,"solidity":0.2}},"type":"bar"}],"scattergeo":[{"type":"scattergeo","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatterpolar":[{"type":"scatterpolar","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"histogram":[{"marker":{"pattern":{"fillmode":"overlay","size":10,"solidity":0.2}},"type":"histogram"}],"scattergl":[{"type":"scattergl","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatter3d":[{"type":"scatter3d","line":{"colorbar":{"outlinewidth":0,"ticks":""}},"marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scattermap":[{"type":"scattermap","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatterternary":[{"type":"scatterternary","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scattercarpet":[{"type":"scattercarpet","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"carpet":[{"aaxis":{"endlinecolor":"#2a3f5f","gridcolor":"white","linecolor":"white","minorgridcolor":"white","startlinecolor":"#2a3f5f"},"baxis":{"endlinecolor":"#2a3f5f","gridcolor":"white","linecolor":"white","minorgridcolor":"white","startlinecolor":"#2a3f5f"},"type":"carpet"}],"table":[{"cells":{"fill":{"color":"#EBF0F8"},"line":{"color":"white"}},"header":{"fill":{"color":"#C8D4E3"},"line":{"color":"white"}},"type":"table"}],"barpolar":[{"marker":{"line":{"color":"#E5ECF6","width":0.5},"pattern":{"fillmode":"overlay","size":10,"solidity":0.2}},"type":"barpolar"}],"pie":[{"automargin":true,"type":"pie"}]},"layout":{"autotypenumbers":"strict","colorway":["#636efa","#EF553B","#00cc96","#ab63fa","#FFA15A","#19d3f3","#FF6692","#B6E880","#FF97FF","#FECB52"],"font":{"color":"#2a3f5f"},"hovermode":"closest","hoverlabel":{"align":"left"},"paper_bgcolor":"white","plot_bgcolor":"#E5ECF6","polar":{"bgcolor":"#E5ECF6","angularaxis":{"gridcolor":"white","linecolor":"white","ticks":""},"radialaxis":{"gridcolor":"white","linecolor":"white","ticks":""}},"ternary":{"bgcolor":"#E5ECF6","aaxis":{"gridcolor":"white","linecolor":"white","ticks":""},"baxis":{"gridcolor":"white","linecolor":"white","ticks":""},"caxis":{"gridcolor":"white","linecolor":"white","ticks":""}},"coloraxis":{"colorbar":{"outlinewidth":0,"ticks":""}},"colorscale":{"sequential":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]],"sequentialminus":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]],"diverging":[[0,"#8e0152"],[0.1,"#c51b7d"],[0.2,"#de77ae"],[0.3,"#f1b6da"],[0.4,"#fde0ef"],[0.5,"#f7f7f7"],[0.6,"#e6f5d0"],[0.7,"#b8e186"],[0.8,"#7fbc41"],[0.9,"#4d9221"],[1,"#276419"]]},"xaxis":{"gridcolor":"white","linecolor":"white","ticks":"","title":{"standoff":15},"zerolinecolor":"white","automargin":true,"zerolinewidth":2},"yaxis":{"gridcolor":"white","linecolor":"white","ticks":"","title":{"standoff":15},"zerolinecolor":"white","automargin":true,"zerolinewidth":2},"scene":{"xaxis":{"backgroundcolor":"#E5ECF6","gridcolor":"white","linecolor":"white","showbackground":true,"ticks":"","zerolinecolor":"white","gridwidth":2},"yaxis":{"backgroundcolor":"#E5ECF6","gridcolor":"white","linecolor":"white","showbackground":true,"ticks":"","zerolinecolor":"white","gridwidth":2},"zaxis":{"backgroundcolor":"#E5ECF6","gridcolor":"white","linecolor":"white","showbackground":true,"ticks":"","zerolinecolor":"white","gridwidth":2}},"shapedefaults":{"line":{"color":"#2a3f5f"}},"annotationdefaults":{"arrowcolor":"#2a3f5f","arrowhead":0,"arrowwidth":1},"geo":{"bgcolor":"white","landcolor":"#E5ECF6","subunitcolor":"white","showland":true,"showlakes":true,"lakecolor":"white"},"title":{"x":0.05}}},"updatemenus":[{"bgcolor":"#1a1a1a","bordercolor":"#ff2a2a","borderwidth":1,"buttons":[{"args":[{"y":[[14.523889490001231,15.104406509808532,16.326965129383137,32.11933191991195,142.73244445022098,239.18552432989594,258.95967753008335],[69.08545352973306,76.54323662964998,84.97628350990438,279.0663440201297,336.0353722800572,360.8441678503368,392.6515568592549]]},{"yaxis.title.text":"ITL P99 (ms)","yaxis.range":[0.0,451.5492903881431]}],"label":"ITL P99 (ms)","method":"update"},{"args":[{"y":[[13.439764599479531,13.621880599475844,14.115609799955564,15.354158799982544,16.80641640059548,19.371510499695432,210.72114370026614],[58.41167149965259,61.65331649990549,63.63659610005926,78.32410769970018,214.7953364003115,353.0753845002437,384.9501814993346]]},{"yaxis.title.text":"ITL P90 (ms)","yaxis.range":[0.0,442.6927087242347]}],"label":"ITL P90 (ms)","method":"update"},{"args":[{"y":[[10.913666499618557,10.265408999657666,8.9998174998982,10.447724000187009,13.168494499950611,17.74117649983964,20.226364000336616],[42.86127300019871,46.110877499813796,52.06815600013215,58.1330270001672,72.6328740001918,101.45759350007211,371.3188070000797]]},{"yaxis.title.text":"ITL P50 (ms)","yaxis.range":[0.0,427.0166280500916]}],"label":"ITL P50 (ms)","method":"update"},{"args":[{"y":[[10.90265937322701,10.982038580314972,10.15439143720457,12.265314847539456,16.076444775295005,27.86471076582181,45.147547469500466],[8.380008423622225,9.057614635826319,11.282420433464157,14.267482608366254,20.427863149754195,33.7717003817667,59.0583548609126]]},{"yaxis.title.text":"TPOT Mean (ms\u002ftoken)","yaxis.range":[0.0,67.91710809004948]}],"label":"TPOT Mean (ms\u002ftoken)","method":"update"}],"direction":"down","font":{"color":"#ffffff","size":11},"type":"dropdown","x":1.0,"xanchor":"right","y":1.11,"yanchor":"top"}]},                        {"responsive": true, "displaylogo": false, "modeBarButtonsToRemove": ["select2d", "lasso2d"]}                    )                };            </script>        </div></div>
+        <div class="card"><div style="height:435px; width:100%;">                            <div id="93614f71-4dc9-4eff-8e08-42054ec8762e" class="plotly-graph-div" style="height:100%; width:100%;"></div>            <script>                window.PLOTLYENV=window.PLOTLYENV || {};                                if (document.getElementById("93614f71-4dc9-4eff-8e08-42054ec8762e")) {                    Plotly.newPlot(                        "93614f71-4dc9-4eff-8e08-42054ec8762e",                        [{"hovertemplate":"\u003cb\u003e%{fullData.name}\u003c\u002fb\u003e\u003cbr\u003ePrompt: %{x} tok\u003cbr\u003eTTFT: %{y:.2f} ms\u003cextra\u003e\u003c\u002fextra\u003e","line":{"color":"#ff2a2a","width":2.5},"marker":{"color":"#ff2a2a","size":8},"mode":"lines+markers","name":"stage-0-vllm","x":[128,256,512,1024,2048,4096,8192],"y":[46.33664399971167,56.50280020008722,79.54942089982069,105.47155630001726,208.13904359993103,416.4650294997955,673.6648645001878],"type":"scatter"},{"hovertemplate":"\u003cb\u003e%{fullData.name}\u003c\u002fb\u003e\u003cbr\u003ePrompt: %{x} tok\u003cbr\u003eTTFT: %{y:.2f} ms\u003cextra\u003e\u003c\u002fextra\u003e","line":{"color":"#ffffff","width":2.5},"marker":{"color":"#ffffff","size":8},"mode":"lines+markers","name":"stage-1-vllm","x":[128,256,512,1024,2048,4096,8192],"y":[125.28488460029621,142.1445528001641,174.48974680009997,261.66443080001045,411.56177800003206,755.3572327997244,1752.662436099854],"type":"scatter"}],                        {"font":{"color":"#a0a0a0","family":"Inter, monospace","size":12},"height":435,"hovermode":"closest","legend":{"bgcolor":"rgba(0,0,0,0)","font":{"color":"#ffffff","size":11},"orientation":"h","x":0.0,"xanchor":"left","y":1.02,"yanchor":"bottom"},"margin":{"b":55,"l":60,"r":30,"t":82},"paper_bgcolor":"#121212","plot_bgcolor":"#121212","title":{"font":{"color":"#ffffff","family":"Inter, sans-serif","size":17},"text":"Prompt Size vs. Time to First Token","x":0.01,"y":0.96},"xaxis":{"gridcolor":"#222222","linecolor":"#333333","title":{"font":{"color":"#ffffff"},"text":"Input Prompt Length (tokens)"},"zerolinecolor":"#222222","range":[0,8847.36]},"yaxis":{"gridcolor":"#222222","linecolor":"#333333","title":{"font":{"color":"#ffffff"},"text":"Time to First Token - TTFT (ms)"},"zerolinecolor":"#222222","range":[0.0,2015.5618015148318]},"template":{"data":{"histogram2dcontour":[{"type":"histogram2dcontour","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"choropleth":[{"type":"choropleth","colorbar":{"outlinewidth":0,"ticks":""}}],"histogram2d":[{"type":"histogram2d","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"heatmap":[{"type":"heatmap","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"contourcarpet":[{"type":"contourcarpet","colorbar":{"outlinewidth":0,"ticks":""}}],"contour":[{"type":"contour","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"surface":[{"type":"surface","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"mesh3d":[{"type":"mesh3d","colorbar":{"outlinewidth":0,"ticks":""}}],"scatter":[{"fillpattern":{"fillmode":"overlay","size":10,"solidity":0.2},"type":"scatter"}],"parcoords":[{"type":"parcoords","line":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatterpolargl":[{"type":"scatterpolargl","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"bar":[{"error_x":{"color":"#2a3f5f"},"error_y":{"color":"#2a3f5f"},"marker":{"line":{"color":"#E5ECF6","width":0.5},"pattern":{"fillmode":"overlay","size":10,"solidity":0.2}},"type":"bar"}],"scattergeo":[{"type":"scattergeo","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatterpolar":[{"type":"scatterpolar","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"histogram":[{"marker":{"pattern":{"fillmode":"overlay","size":10,"solidity":0.2}},"type":"histogram"}],"scattergl":[{"type":"scattergl","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatter3d":[{"type":"scatter3d","line":{"colorbar":{"outlinewidth":0,"ticks":""}},"marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scattermap":[{"type":"scattermap","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatterternary":[{"type":"scatterternary","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scattercarpet":[{"type":"scattercarpet","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"carpet":[{"aaxis":{"endlinecolor":"#2a3f5f","gridcolor":"white","linecolor":"white","minorgridcolor":"white","startlinecolor":"#2a3f5f"},"baxis":{"endlinecolor":"#2a3f5f","gridcolor":"white","linecolor":"white","minorgridcolor":"white","startlinecolor":"#2a3f5f"},"type":"carpet"}],"table":[{"cells":{"fill":{"color":"#EBF0F8"},"line":{"color":"white"}},"header":{"fill":{"color":"#C8D4E3"},"line":{"color":"white"}},"type":"table"}],"barpolar":[{"marker":{"line":{"color":"#E5ECF6","width":0.5},"pattern":{"fillmode":"overlay","size":10,"solidity":0.2}},"type":"barpolar"}],"pie":[{"automargin":true,"type":"pie"}]},"layout":{"autotypenumbers":"strict","colorway":["#636efa","#EF553B","#00cc96","#ab63fa","#FFA15A","#19d3f3","#FF6692","#B6E880","#FF97FF","#FECB52"],"font":{"color":"#2a3f5f"},"hovermode":"closest","hoverlabel":{"align":"left"},"paper_bgcolor":"white","plot_bgcolor":"#E5ECF6","polar":{"bgcolor":"#E5ECF6","angularaxis":{"gridcolor":"white","linecolor":"white","ticks":""},"radialaxis":{"gridcolor":"white","linecolor":"white","ticks":""}},"ternary":{"bgcolor":"#E5ECF6","aaxis":{"gridcolor":"white","linecolor":"white","ticks":""},"baxis":{"gridcolor":"white","linecolor":"white","ticks":""},"caxis":{"gridcolor":"white","linecolor":"white","ticks":""}},"coloraxis":{"colorbar":{"outlinewidth":0,"ticks":""}},"colorscale":{"sequential":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]],"sequentialminus":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]],"diverging":[[0,"#8e0152"],[0.1,"#c51b7d"],[0.2,"#de77ae"],[0.3,"#f1b6da"],[0.4,"#fde0ef"],[0.5,"#f7f7f7"],[0.6,"#e6f5d0"],[0.7,"#b8e186"],[0.8,"#7fbc41"],[0.9,"#4d9221"],[1,"#276419"]]},"xaxis":{"gridcolor":"white","linecolor":"white","ticks":"","title":{"standoff":15},"zerolinecolor":"white","automargin":true,"zerolinewidth":2},"yaxis":{"gridcolor":"white","linecolor":"white","ticks":"","title":{"standoff":15},"zerolinecolor":"white","automargin":true,"zerolinewidth":2},"scene":{"xaxis":{"backgroundcolor":"#E5ECF6","gridcolor":"white","linecolor":"white","showbackground":true,"ticks":"","zerolinecolor":"white","gridwidth":2},"yaxis":{"backgroundcolor":"#E5ECF6","gridcolor":"white","linecolor":"white","showbackground":true,"ticks":"","zerolinecolor":"white","gridwidth":2},"zaxis":{"backgroundcolor":"#E5ECF6","gridcolor":"white","linecolor":"white","showbackground":true,"ticks":"","zerolinecolor":"white","gridwidth":2}},"shapedefaults":{"line":{"color":"#2a3f5f"}},"annotationdefaults":{"arrowcolor":"#2a3f5f","arrowhead":0,"arrowwidth":1},"geo":{"bgcolor":"white","landcolor":"#E5ECF6","subunitcolor":"white","showland":true,"showlakes":true,"lakecolor":"white"},"title":{"x":0.05}}}},                        {"responsive": true, "displaylogo": false, "modeBarButtonsToRemove": ["select2d", "lasso2d"]}                    )                };            </script>        </div></div>
+        <div class="card"><div style="height:435px; width:100%;">                            <div id="027cbacc-0883-46ef-872a-81fee6614eb4" class="plotly-graph-div" style="height:100%; width:100%;"></div>            <script>                window.PLOTLYENV=window.PLOTLYENV || {};                                if (document.getElementById("027cbacc-0883-46ef-872a-81fee6614eb4")) {                    Plotly.newPlot(                        "027cbacc-0883-46ef-872a-81fee6614eb4",                        [{"hovertemplate":"\u003cb\u003e%{fullData.name}\u003c\u002fb\u003e\u003cbr\u003eContext: %{x} tok\u003cbr\u003eValue: %{y:.2f}\u003cextra\u003e\u003c\u002fextra\u003e","line":{"color":"#ff2a2a","width":2.5},"marker":{"color":"#ff2a2a","size":8},"mode":"lines+markers","name":"stage-0-vllm","x":[128,256,512,1024,2048,4096,8192],"y":[10.667886906350528,10.751076912702192,10.093991552382667,8.987135022222887,10.113785109522375,10.407473012700002,9.239642087298321],"type":"scatter"},{"hovertemplate":"\u003cb\u003e%{fullData.name}\u003c\u002fb\u003e\u003cbr\u003eContext: %{x} tok\u003cbr\u003eValue: %{y:.2f}\u003cextra\u003e\u003c\u002fextra\u003e","line":{"color":"#ffffff","width":2.5},"marker":{"color":"#ffffff","size":8},"mode":"lines+markers","name":"stage-1-vllm","x":[128,256,512,1024,2048,4096,8192],"y":[12.116301266663262,7.980571699997763,8.146176719044831,8.70372903015763,10.57947607777827,10.16121172381515,13.429417174599607],"type":"scatter"}],                        {"font":{"color":"#a0a0a0","family":"Inter, monospace","size":12},"height":435,"hovermode":"closest","legend":{"bgcolor":"rgba(0,0,0,0)","font":{"color":"#ffffff","size":11},"orientation":"h","x":0.0,"xanchor":"left","y":1.02,"yanchor":"bottom"},"margin":{"b":55,"l":60,"r":30,"t":82},"paper_bgcolor":"#121212","plot_bgcolor":"#121212","title":{"font":{"color":"#ffffff","family":"Inter, sans-serif","size":17},"text":"Context Length vs. Generation Speed","x":0.01,"y":0.96},"xaxis":{"gridcolor":"#222222","linecolor":"#333333","title":{"font":{"color":"#ffffff"},"text":"Context Sequence Length (tokens)"},"zerolinecolor":"#222222","range":[0,8847.36]},"yaxis":{"gridcolor":"#222222","linecolor":"#333333","title":{"font":{"color":"#ffffff"},"text":"TPOT (ms\u002ftoken)"},"zerolinecolor":"#222222","range":[0.0,15.443829750789547]},"template":{"data":{"histogram2dcontour":[{"type":"histogram2dcontour","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"choropleth":[{"type":"choropleth","colorbar":{"outlinewidth":0,"ticks":""}}],"histogram2d":[{"type":"histogram2d","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"heatmap":[{"type":"heatmap","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"contourcarpet":[{"type":"contourcarpet","colorbar":{"outlinewidth":0,"ticks":""}}],"contour":[{"type":"contour","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"surface":[{"type":"surface","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"mesh3d":[{"type":"mesh3d","colorbar":{"outlinewidth":0,"ticks":""}}],"scatter":[{"fillpattern":{"fillmode":"overlay","size":10,"solidity":0.2},"type":"scatter"}],"parcoords":[{"type":"parcoords","line":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatterpolargl":[{"type":"scatterpolargl","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"bar":[{"error_x":{"color":"#2a3f5f"},"error_y":{"color":"#2a3f5f"},"marker":{"line":{"color":"#E5ECF6","width":0.5},"pattern":{"fillmode":"overlay","size":10,"solidity":0.2}},"type":"bar"}],"scattergeo":[{"type":"scattergeo","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatterpolar":[{"type":"scatterpolar","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"histogram":[{"marker":{"pattern":{"fillmode":"overlay","size":10,"solidity":0.2}},"type":"histogram"}],"scattergl":[{"type":"scattergl","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatter3d":[{"type":"scatter3d","line":{"colorbar":{"outlinewidth":0,"ticks":""}},"marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scattermap":[{"type":"scattermap","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatterternary":[{"type":"scatterternary","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scattercarpet":[{"type":"scattercarpet","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"carpet":[{"aaxis":{"endlinecolor":"#2a3f5f","gridcolor":"white","linecolor":"white","minorgridcolor":"white","startlinecolor":"#2a3f5f"},"baxis":{"endlinecolor":"#2a3f5f","gridcolor":"white","linecolor":"white","minorgridcolor":"white","startlinecolor":"#2a3f5f"},"type":"carpet"}],"table":[{"cells":{"fill":{"color":"#EBF0F8"},"line":{"color":"white"}},"header":{"fill":{"color":"#C8D4E3"},"line":{"color":"white"}},"type":"table"}],"barpolar":[{"marker":{"line":{"color":"#E5ECF6","width":0.5},"pattern":{"fillmode":"overlay","size":10,"solidity":0.2}},"type":"barpolar"}],"pie":[{"automargin":true,"type":"pie"}]},"layout":{"autotypenumbers":"strict","colorway":["#636efa","#EF553B","#00cc96","#ab63fa","#FFA15A","#19d3f3","#FF6692","#B6E880","#FF97FF","#FECB52"],"font":{"color":"#2a3f5f"},"hovermode":"closest","hoverlabel":{"align":"left"},"paper_bgcolor":"white","plot_bgcolor":"#E5ECF6","polar":{"bgcolor":"#E5ECF6","angularaxis":{"gridcolor":"white","linecolor":"white","ticks":""},"radialaxis":{"gridcolor":"white","linecolor":"white","ticks":""}},"ternary":{"bgcolor":"#E5ECF6","aaxis":{"gridcolor":"white","linecolor":"white","ticks":""},"baxis":{"gridcolor":"white","linecolor":"white","ticks":""},"caxis":{"gridcolor":"white","linecolor":"white","ticks":""}},"coloraxis":{"colorbar":{"outlinewidth":0,"ticks":""}},"colorscale":{"sequential":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]],"sequentialminus":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]],"diverging":[[0,"#8e0152"],[0.1,"#c51b7d"],[0.2,"#de77ae"],[0.3,"#f1b6da"],[0.4,"#fde0ef"],[0.5,"#f7f7f7"],[0.6,"#e6f5d0"],[0.7,"#b8e186"],[0.8,"#7fbc41"],[0.9,"#4d9221"],[1,"#276419"]]},"xaxis":{"gridcolor":"white","linecolor":"white","ticks":"","title":{"standoff":15},"zerolinecolor":"white","automargin":true,"zerolinewidth":2},"yaxis":{"gridcolor":"white","linecolor":"white","ticks":"","title":{"standoff":15},"zerolinecolor":"white","automargin":true,"zerolinewidth":2},"scene":{"xaxis":{"backgroundcolor":"#E5ECF6","gridcolor":"white","linecolor":"white","showbackground":true,"ticks":"","zerolinecolor":"white","gridwidth":2},"yaxis":{"backgroundcolor":"#E5ECF6","gridcolor":"white","linecolor":"white","showbackground":true,"ticks":"","zerolinecolor":"white","gridwidth":2},"zaxis":{"backgroundcolor":"#E5ECF6","gridcolor":"white","linecolor":"white","showbackground":true,"ticks":"","zerolinecolor":"white","gridwidth":2}},"shapedefaults":{"line":{"color":"#2a3f5f"}},"annotationdefaults":{"arrowcolor":"#2a3f5f","arrowhead":0,"arrowwidth":1},"geo":{"bgcolor":"white","landcolor":"#E5ECF6","subunitcolor":"white","showland":true,"showlakes":true,"lakecolor":"white"},"title":{"x":0.05}}},"updatemenus":[{"bgcolor":"#1a1a1a","bordercolor":"#ff2a2a","borderwidth":1,"buttons":[{"args":[{"y":[[10.667886906350528,10.751076912702192,10.093991552382667,8.987135022222887,10.113785109522375,10.407473012700002,9.239642087298321],[12.116301266663262,7.980571699997763,8.146176719044831,8.70372903015763,10.57947607777827,10.16121172381515,13.429417174599607]]},{"yaxis.title.text":"TPOT (ms\u002ftoken)","yaxis.range":[0.0,15.443829750789547]}],"label":"TPOT (ms\u002ftoken)","method":"update"},{"args":[{"y":[[93.73927646389896,93.01393787058849,99.06883662528448,111.27016535606238,98.87495029516452,96.0848035617986,108.22930050230991],[82.53343805104909,125.30430620656917,122.75697354589843,114.89328269929945,94.52263917874501,98.41345965228426,74.46339532078872]]},{"yaxis.title.text":"Generation Speed (tokens\u002fs\u002freq)","yaxis.range":[0.0,144.09995213755454]}],"label":"Generation Speed (tokens\u002fs\u002freq)","method":"update"}],"direction":"down","font":{"color":"#ffffff","size":11},"type":"dropdown","x":1.0,"xanchor":"right","y":1.11,"yanchor":"top"}]},                        {"responsive": true, "displaylogo": false, "modeBarButtonsToRemove": ["select2d", "lasso2d"]}                    )                };            </script>        </div></div>
+        <div class="card">
+    <div class="plot4-header-bar">
+        <div class="plot4-title">Hardware Roofline (Compute vs. Memory)</div>
+        <div class="filter-controls">
+            <div class="pill-group" id="roofline-phase-pills">
+                <button class="pill active" data-phase="all" onclick="setRooflinePhase('all')">All Phases</button>
+                <button class="pill" data-phase="prefill" onclick="setRooflinePhase('prefill')">Prefill</button>
+                <button class="pill" data-phase="decode" onclick="setRooflinePhase('decode')">Decode</button>
+            </div>
+            <select id="roofline-kernel-select" class="dark-select" onchange="filterRooflinePlot()">
+                <option value="core" selected>Core Kernels (Attn & Linear)</option><option value="all">All Kernels</option><option value="Prefill Linear (GEMM/GEMV)">Kernel: Prefill Linear (GEMM/GEMV)</option><option value="Prefill Attention">Kernel: Prefill Attention</option><option value="Prefill Fused RMSNorm">Kernel: Prefill Fused RMSNorm</option><option value="Prefill SwiGLU Activation">Kernel: Prefill SwiGLU Activation</option><option value="Prefill RoPE Embedding">Kernel: Prefill RoPE Embedding</option><option value="Prefill KV Cache Write">Kernel: Prefill KV Cache Write</option><option value="Decode Linear (GEMM/GEMV)">Kernel: Decode Linear (GEMM/GEMV)</option><option value="Decode Attention">Kernel: Decode Attention</option><option value="Decode Attention Combine">Kernel: Decode Attention Combine</option><option value="Decode Fused RMSNorm">Kernel: Decode Fused RMSNorm</option><option value="Decode SwiGLU Activation">Kernel: Decode SwiGLU Activation</option><option value="Decode RoPE Embedding">Kernel: Decode RoPE Embedding</option><option value="Decode KV Cache Write">Kernel: Decode KV Cache Write</option>
+            </select>
+            <select id="roofline-stage-select" class="dark-select" onchange="filterRooflinePlot()">
+                <option value="all" selected>All Stages</option><option value="stage-0-vllm">stage-0-vllm</option><option value="stage-1-vllm">stage-1-vllm</option>
+            </select>
+        </div>
+    </div>
+    <div style="height:365px; width:100%;">                            <div id="roofline-plot" class="plotly-graph-div" style="height:100%; width:100%;"></div>            <script>                window.PLOTLYENV=window.PLOTLYENV || {};                                if (document.getElementById("roofline-plot")) {                    Plotly.newPlot(                        "roofline-plot",                        [{"hoverinfo":"skip","line":{"color":"#ff2a2a","dash":"dash","width":2},"mode":"lines","name":"Hardware Ceiling (512 GB\u002fs | 100 TFLOP\u002fs)","x":[0.02,195.3125,4096.0],"y":[0.01024,100.0,100.0],"type":"scatter"},{"customdata":[["Prefill",4125.15,28.21,"Prefill Linear GEMM","stage-0-vllm"],["Prefill",732.58,11.55,"Prefill Attention (FlashDecode\u002fSplitKV)","stage-0-vllm"],["Decode",177.7,321.1,"Decode Linear GEMV","stage-0-vllm"],["Decode",26.02,82.87,"Decode Attention (FlashDecode\u002fSplitKV)","stage-0-vllm"]],"hovertemplate":"\u003cb\u003e%{customdata[3]}\u003c\u002fb\u003e\u003cbr\u003eStage: \u003cb\u003e%{customdata[4]}\u003c\u002fb\u003e (%{customdata[0]})\u003cbr\u003eAI: %{x:.2f} FLOP\u002fB\u003cbr\u003ePerf: %{y:.4f} TFLOP\u002fs\u003cbr\u003eDRAM: %{customdata[2]:.1f} GB\u002fs\u003cbr\u003eDuration: %{customdata[1]:.2f} us\u003cextra\u003e\u003c\u002fextra\u003e","marker":{"color":"#ff2a2a","line":{"color":"#000000","width":1.2},"size":14,"symbol":["diamond","diamond","circle","circle"]},"mode":"markers+text","name":"stage-0-vllm","text":["Prefill Linear GEMM","Prefill Attention (FlashDecode\u002fSplitKV)","Decode Linear GEMV","Decode Attention (FlashDecode\u002fSplitKV)"],"textfont":{"color":"#a0a0a0","size":10},"textposition":"top center","x":[969.482,1631.024,1.001,66.669],"y":[27.348,18.838,0.321,5.525],"type":"scatter"},{"customdata":[["Prefill",4184.22,28.06,"Prefill Linear GEMM","stage-1-vllm"],["Prefill",739.65,11.45,"Prefill Attention (FlashDecode\u002fSplitKV)","stage-1-vllm"],["Decode",174.91,325.56,"Decode Linear GEMM","stage-1-vllm"],["Decode",205.25,10.69,"Decode Attention (FlashDecode\u002fSplitKV)","stage-1-vllm"]],"hovertemplate":"\u003cb\u003e%{customdata[3]}\u003c\u002fb\u003e\u003cbr\u003eStage: \u003cb\u003e%{customdata[4]}\u003c\u002fb\u003e (%{customdata[0]})\u003cbr\u003eAI: %{x:.2f} FLOP\u002fB\u003cbr\u003ePerf: %{y:.4f} TFLOP\u002fs\u003cbr\u003eDRAM: %{customdata[2]:.1f} GB\u002fs\u003cbr\u003eDuration: %{customdata[1]:.2f} us\u003cextra\u003e\u003c\u002fextra\u003e","marker":{"color":"#ffffff","line":{"color":"#000000","width":1.2},"size":8,"symbol":["diamond","diamond","circle","circle"]},"mode":"markers+text","name":"stage-1-vllm","text":["Prefill Linear GEMM","Prefill Attention (FlashDecode\u002fSplitKV)","Decode Linear GEMM","Decode Attention (FlashDecode\u002fSplitKV)"],"textfont":{"color":"#a0a0a0","size":10},"textposition":"top center","x":[960.813,1629.25,15.473,392.964],"y":[26.962,18.658,5.037,4.202],"type":"scatter"}],                        {"font":{"color":"#a0a0a0","family":"Inter, monospace","size":12},"height":365,"hovermode":"closest","legend":{"bgcolor":"rgba(0,0,0,0)","font":{"color":"#ffffff","size":11},"orientation":"h","x":0.0,"xanchor":"left","y":1.03,"yanchor":"bottom"},"margin":{"b":50,"l":60,"r":30,"t":36},"paper_bgcolor":"#121212","plot_bgcolor":"#121212","title":{"font":{"color":"#ffffff","family":"Inter, sans-serif","size":17},"text":"","x":0.01,"y":0.96},"xaxis":{"gridcolor":"#222222","linecolor":"#333333","title":{"font":{"color":"#ffffff"},"text":"Arithmetic Intensity (FLOP\u002fByte)"},"zerolinecolor":"#222222","type":"log","range":[-1.6989700043360187,3.612359947967774],"autorange":false},"yaxis":{"gridcolor":"#222222","linecolor":"#333333","title":{"font":{"color":"#ffffff"},"text":"Attained Performance (TFLOP\u002fs)"},"zerolinecolor":"#222222","type":"log","range":[-4.339893778276756,2.255272505103306],"autorange":false},"template":{"data":{"histogram2dcontour":[{"type":"histogram2dcontour","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"choropleth":[{"type":"choropleth","colorbar":{"outlinewidth":0,"ticks":""}}],"histogram2d":[{"type":"histogram2d","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"heatmap":[{"type":"heatmap","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"contourcarpet":[{"type":"contourcarpet","colorbar":{"outlinewidth":0,"ticks":""}}],"contour":[{"type":"contour","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"surface":[{"type":"surface","colorbar":{"outlinewidth":0,"ticks":""},"colorscale":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]]}],"mesh3d":[{"type":"mesh3d","colorbar":{"outlinewidth":0,"ticks":""}}],"scatter":[{"fillpattern":{"fillmode":"overlay","size":10,"solidity":0.2},"type":"scatter"}],"parcoords":[{"type":"parcoords","line":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatterpolargl":[{"type":"scatterpolargl","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"bar":[{"error_x":{"color":"#2a3f5f"},"error_y":{"color":"#2a3f5f"},"marker":{"line":{"color":"#E5ECF6","width":0.5},"pattern":{"fillmode":"overlay","size":10,"solidity":0.2}},"type":"bar"}],"scattergeo":[{"type":"scattergeo","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatterpolar":[{"type":"scatterpolar","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"histogram":[{"marker":{"pattern":{"fillmode":"overlay","size":10,"solidity":0.2}},"type":"histogram"}],"scattergl":[{"type":"scattergl","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatter3d":[{"type":"scatter3d","line":{"colorbar":{"outlinewidth":0,"ticks":""}},"marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scattermap":[{"type":"scattermap","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scatterternary":[{"type":"scatterternary","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"scattercarpet":[{"type":"scattercarpet","marker":{"colorbar":{"outlinewidth":0,"ticks":""}}}],"carpet":[{"aaxis":{"endlinecolor":"#2a3f5f","gridcolor":"white","linecolor":"white","minorgridcolor":"white","startlinecolor":"#2a3f5f"},"baxis":{"endlinecolor":"#2a3f5f","gridcolor":"white","linecolor":"white","minorgridcolor":"white","startlinecolor":"#2a3f5f"},"type":"carpet"}],"table":[{"cells":{"fill":{"color":"#EBF0F8"},"line":{"color":"white"}},"header":{"fill":{"color":"#C8D4E3"},"line":{"color":"white"}},"type":"table"}],"barpolar":[{"marker":{"line":{"color":"#E5ECF6","width":0.5},"pattern":{"fillmode":"overlay","size":10,"solidity":0.2}},"type":"barpolar"}],"pie":[{"automargin":true,"type":"pie"}]},"layout":{"autotypenumbers":"strict","colorway":["#636efa","#EF553B","#00cc96","#ab63fa","#FFA15A","#19d3f3","#FF6692","#B6E880","#FF97FF","#FECB52"],"font":{"color":"#2a3f5f"},"hovermode":"closest","hoverlabel":{"align":"left"},"paper_bgcolor":"white","plot_bgcolor":"#E5ECF6","polar":{"bgcolor":"#E5ECF6","angularaxis":{"gridcolor":"white","linecolor":"white","ticks":""},"radialaxis":{"gridcolor":"white","linecolor":"white","ticks":""}},"ternary":{"bgcolor":"#E5ECF6","aaxis":{"gridcolor":"white","linecolor":"white","ticks":""},"baxis":{"gridcolor":"white","linecolor":"white","ticks":""},"caxis":{"gridcolor":"white","linecolor":"white","ticks":""}},"coloraxis":{"colorbar":{"outlinewidth":0,"ticks":""}},"colorscale":{"sequential":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]],"sequentialminus":[[0.0,"#0d0887"],[0.1111111111111111,"#46039f"],[0.2222222222222222,"#7201a8"],[0.3333333333333333,"#9c179e"],[0.4444444444444444,"#bd3786"],[0.5555555555555556,"#d8576b"],[0.6666666666666666,"#ed7953"],[0.7777777777777778,"#fb9f3a"],[0.8888888888888888,"#fdca26"],[1.0,"#f0f921"]],"diverging":[[0,"#8e0152"],[0.1,"#c51b7d"],[0.2,"#de77ae"],[0.3,"#f1b6da"],[0.4,"#fde0ef"],[0.5,"#f7f7f7"],[0.6,"#e6f5d0"],[0.7,"#b8e186"],[0.8,"#7fbc41"],[0.9,"#4d9221"],[1,"#276419"]]},"xaxis":{"gridcolor":"white","linecolor":"white","ticks":"","title":{"standoff":15},"zerolinecolor":"white","automargin":true,"zerolinewidth":2},"yaxis":{"gridcolor":"white","linecolor":"white","ticks":"","title":{"standoff":15},"zerolinecolor":"white","automargin":true,"zerolinewidth":2},"scene":{"xaxis":{"backgroundcolor":"#E5ECF6","gridcolor":"white","linecolor":"white","showbackground":true,"ticks":"","zerolinecolor":"white","gridwidth":2},"yaxis":{"backgroundcolor":"#E5ECF6","gridcolor":"white","linecolor":"white","showbackground":true,"ticks":"","zerolinecolor":"white","gridwidth":2},"zaxis":{"backgroundcolor":"#E5ECF6","gridcolor":"white","linecolor":"white","showbackground":true,"ticks":"","zerolinecolor":"white","gridwidth":2}},"shapedefaults":{"line":{"color":"#2a3f5f"}},"annotationdefaults":{"arrowcolor":"#2a3f5f","arrowhead":0,"arrowwidth":1},"geo":{"bgcolor":"white","landcolor":"#E5ECF6","subunitcolor":"white","showland":true,"showlakes":true,"lakecolor":"white"},"title":{"x":0.05}}}},                        {"responsive": true, "displaylogo": false, "modeBarButtonsToRemove": ["select2d", "lasso2d"]}                    )                };            </script>        </div></div>
     </div>
 
     
@@ -158,7 +254,7 @@
                         <th>GPU Active Time (%)</th>
                         <th>GPU Idle (%)</th>
                         <th>CPU Launch Overhead</th>
-                        <th>CUDA Sync Wait (ms)</th>
+                        <th>CUDA Sync (ms)</th>
                         <th>Prefill Duration</th>
                         <th>Decode Duration</th>
                         <th>Kernel Time (Lin / Attn / Oth)</th>
@@ -173,7 +269,7 @@
             <td>28.90 ms <span class="sub">(1,636 calls, 63 graphs)</span></td>
             <td>718.74</td>
             <td>195.05 ms <span class="sub">(22.5%)</span></td>
-            <td>10.67 ms/step <span class="sub">(672.3 ms total)</span></td>
+            <td>10.67 ms/step <span class="sub">(672.3 ms tot.)</span></td>
             <td>91.9% / 0.7% / 7.4% <span class="sub">(704.9 / 5.1 / 56.7 ms)</span></td>
         </tr>
         <tr>
@@ -184,15 +280,30 @@
             <td>277.00 ms <span class="sub">(19,843 calls, 13 graphs)</span></td>
             <td>22.78</td>
             <td>219.74 ms <span class="sub">(28.3%)</span></td>
-            <td>8.83 ms/step <span class="sub">(556.5 ms total)</span></td>
+            <td>8.83 ms/step <span class="sub">(556.5 ms tot.)</span></td>
             <td>89.7% / 0.7% / 9.5% <span class="sub">(450.9 / 3.6 / 48.0 ms)</span></td>
         </tr></tbody>
             </table>
         </div>
 
         <div class="card table-card">
-            <h2>Table B: Kernel Details (Nsight Compute)</h2>
-            <table>
+            <div class="table-header-bar">
+                <h2>Table B: Kernel Details (Nsight Compute)</h2>
+                <div class="filter-controls">
+                    <div class="pill-group" id="ncu-phase-pills">
+                        <button class="pill active" data-phase="all" onclick="setNcuPhase('all')">All Phases</button>
+                        <button class="pill" data-phase="prefill" onclick="setNcuPhase('prefill')">Prefill</button>
+                        <button class="pill" data-phase="decode" onclick="setNcuPhase('decode')">Decode</button>
+                    </div>
+                    <select id="ncu-kernel-select" class="dark-select" onchange="filterNcuTable()">
+                        <option value="core" selected>Core Kernels (Attn & Linear)</option><option value="all">All Kernels</option><option value="Prefill Linear (GEMM/GEMV)">Kernel: Prefill Linear (GEMM/GEMV)</option><option value="Prefill Attention">Kernel: Prefill Attention</option><option value="Prefill Fused RMSNorm">Kernel: Prefill Fused RMSNorm</option><option value="Prefill SwiGLU Activation">Kernel: Prefill SwiGLU Activation</option><option value="Prefill RoPE Embedding">Kernel: Prefill RoPE Embedding</option><option value="Prefill KV Cache Write">Kernel: Prefill KV Cache Write</option><option value="Decode Linear (GEMM/GEMV)">Kernel: Decode Linear (GEMM/GEMV)</option><option value="Decode Attention">Kernel: Decode Attention</option><option value="Decode Attention Combine">Kernel: Decode Attention Combine</option><option value="Decode Fused RMSNorm">Kernel: Decode Fused RMSNorm</option><option value="Decode SwiGLU Activation">Kernel: Decode SwiGLU Activation</option><option value="Decode RoPE Embedding">Kernel: Decode RoPE Embedding</option><option value="Decode KV Cache Write">Kernel: Decode KV Cache Write</option>
+                    </select>
+                    <select id="ncu-stage-select" class="dark-select" onchange="filterNcuTable()">
+                        <option value="all" selected>All Stages</option><option value="stage-0-vllm">stage-0-vllm</option><option value="stage-1-vllm">stage-1-vllm</option>
+                    </select>
+                </div>
+            </div>
+            <table id="ncu-table">
                 <thead>
                     <tr>
                         <th>Stage</th>
@@ -207,284 +318,534 @@
                     </tr>
                 </thead>
                 <tbody>
-            <tr>
-                <td class="stage-cell">stage-0-vllm</td>
-                <td><span class='badge badge-prefill'>Prefill</span> Prefill Fused RMSNorm</td>
-                <td>45.41</td>
-                <td>54.2% <span class="sub">(277.5 GB/s)</span></td>
-                <td>0.5% <span class="sub">(0.46 TFLOP/s)</span></td>
-                <td class="ai-cell">1.66</td>
-                <td>84.5%</td>
-                <td>38</td>
-                <td>0</td>
-            </tr>
-            <tr>
-                <td class="stage-cell">stage-0-vllm</td>
-                <td><span class='badge badge-prefill'>Prefill</span> Prefill Linear GEMM</td>
-                <td>4125.15</td>
-                <td>5.5% <span class="sub">(28.2 GB/s)</span></td>
-                <td>27.3% <span class="sub">(27.35 TFLOP/s)</span></td>
-                <td class="ai-cell">969.48</td>
-                <td>16.6%</td>
-                <td>232</td>
-                <td>0</td>
-            </tr>
-            <tr>
-                <td class="stage-cell">stage-0-vllm</td>
-                <td><span class='badge badge-prefill'>Prefill</span> Prefill RoPE Embedding</td>
-                <td>54.82</td>
-                <td>28.1% <span class="sub">(143.9 GB/s)</span></td>
-                <td>0.2% <span class="sub">(0.25 TFLOP/s)</span></td>
-                <td class="ai-cell">1.73</td>
-                <td>65.3%</td>
-                <td>31</td>
-                <td>0</td>
-            </tr>
-            <tr>
-                <td class="stage-cell">stage-0-vllm</td>
-                <td><span class='badge badge-prefill'>Prefill</span> Prefill void vllm::reshape_and_cache</td>
-                <td>28.03</td>
-                <td>14.9% <span class="sub">(76.2 GB/s)</span></td>
-                <td>0.1% <span class="sub">(0.07 TFLOP/s)</span></td>
-                <td class="ai-cell">0.98</td>
-                <td>45.0%</td>
-                <td>48</td>
-                <td>0</td>
-            </tr>
-            <tr>
-                <td class="stage-cell">stage-0-vllm</td>
-                <td><span class='badge badge-prefill'>Prefill</span> Prefill Attention (FlashDecode/SplitKV)</td>
-                <td>732.58</td>
-                <td>2.3% <span class="sub">(11.6 GB/s)</span></td>
-                <td>18.8% <span class="sub">(18.84 TFLOP/s)</span></td>
-                <td class="ai-cell">1631.02</td>
-                <td>8.3%</td>
-                <td>254</td>
-                <td>0</td>
-            </tr>
-            <tr>
-                <td class="stage-cell">stage-0-vllm</td>
-                <td><span class='badge badge-prefill'>Prefill</span> Prefill SwiGLU Activation</td>
-                <td>246.37</td>
-                <td>67.0% <span class="sub">(343.1 GB/s)</span></td>
-                <td>1.9% <span class="sub">(1.94 TFLOP/s)</span></td>
-                <td class="ai-cell">5.64</td>
-                <td>66.6%</td>
-                <td>37</td>
-                <td>0</td>
-            </tr>
-            <tr>
-                <td class="stage-cell">stage-0-vllm</td>
-                <td><span class='badge badge-decode'>Decode</span> Decode Fused RMSNorm</td>
-                <td>7.01</td>
-                <td>0.7% <span class="sub">(3.7 GB/s)</span></td>
-                <td>0.0% <span class="sub">(0.00 TFLOP/s)</span></td>
-                <td class="ai-cell">0.29</td>
-                <td>13.3%</td>
-                <td>40</td>
-                <td>0</td>
-            </tr>
-            <tr>
-                <td class="stage-cell">stage-0-vllm</td>
-                <td><span class='badge badge-decode'>Decode</span> Decode Linear GEMV</td>
-                <td>177.70</td>
-                <td>62.7% <span class="sub">(321.1 GB/s)</span></td>
-                <td>0.3% <span class="sub">(0.32 TFLOP/s)</span></td>
-                <td class="ai-cell">1.00</td>
-                <td>24.4%</td>
-                <td>164</td>
-                <td>0</td>
-            </tr>
-            <tr>
-                <td class="stage-cell">stage-0-vllm</td>
-                <td><span class='badge badge-decode'>Decode</span> Decode RoPE Embedding</td>
-                <td>7.20</td>
-                <td>0.2% <span class="sub">(1.2 GB/s)</span></td>
-                <td>0.0% <span class="sub">(0.00 TFLOP/s)</span></td>
-                <td class="ai-cell">0.74</td>
-                <td>25.6%</td>
-                <td>31</td>
-                <td>0</td>
-            </tr>
-            <tr>
-                <td class="stage-cell">stage-0-vllm</td>
-                <td><span class='badge badge-decode'>Decode</span> Decode void vllm::reshape_and_cache</td>
-                <td>8.96</td>
-                <td>0.5% <span class="sub">(2.5 GB/s)</span></td>
-                <td>0.0% <span class="sub">(0.00 TFLOP/s)</span></td>
-                <td class="ai-cell">0.04</td>
-                <td>16.9%</td>
-                <td>48</td>
-                <td>0</td>
-            </tr>
-            <tr>
-                <td class="stage-cell">stage-0-vllm</td>
-                <td><span class='badge badge-decode'>Decode</span> Decode Attention (FlashDecode/SplitKV)</td>
-                <td>26.02</td>
-                <td>16.2% <span class="sub">(82.9 GB/s)</span></td>
-                <td>5.5% <span class="sub">(5.53 TFLOP/s)</span></td>
-                <td class="ai-cell">66.67</td>
-                <td>9.5%</td>
-                <td>241</td>
-                <td>0</td>
-            </tr>
-            <tr>
-                <td class="stage-cell">stage-0-vllm</td>
-                <td><span class='badge badge-decode'>Decode</span> Decode Attention Combine (Split-K)</td>
-                <td>21.63</td>
-                <td>1.2% <span class="sub">(5.9 GB/s)</span></td>
-                <td>0.0% <span class="sub">(0.00 TFLOP/s)</span></td>
-                <td class="ai-cell">0.50</td>
-                <td>8.3%</td>
-                <td>60</td>
-                <td>0</td>
-            </tr>
-            <tr>
-                <td class="stage-cell">stage-0-vllm</td>
-                <td><span class='badge badge-decode'>Decode</span> Decode SwiGLU Activation</td>
-                <td>9.63</td>
-                <td>0.9% <span class="sub">(4.7 GB/s)</span></td>
-                <td>0.0% <span class="sub">(0.02 TFLOP/s)</span></td>
-                <td class="ai-cell">5.17</td>
-                <td>52.7%</td>
-                <td>27</td>
-                <td>0</td>
-            </tr>
-            <tr>
-                <td class="stage-cell">stage-1-vllm</td>
-                <td><span class='badge badge-prefill'>Prefill</span> Prefill Fused RMSNorm</td>
-                <td>45.18</td>
-                <td>54.5% <span class="sub">(278.9 GB/s)</span></td>
-                <td>0.5% <span class="sub">(0.46 TFLOP/s)</span></td>
-                <td class="ai-cell">1.66</td>
-                <td>89.2%</td>
-                <td>38</td>
-                <td>0</td>
-            </tr>
-            <tr>
-                <td class="stage-cell">stage-1-vllm</td>
-                <td><span class='badge badge-prefill'>Prefill</span> Prefill Linear GEMM</td>
-                <td>4184.22</td>
-                <td>5.5% <span class="sub">(28.1 GB/s)</span></td>
-                <td>27.0% <span class="sub">(26.96 TFLOP/s)</span></td>
-                <td class="ai-cell">960.81</td>
-                <td>16.6%</td>
-                <td>232</td>
-                <td>0</td>
-            </tr>
-            <tr>
-                <td class="stage-cell">stage-1-vllm</td>
-                <td><span class='badge badge-prefill'>Prefill</span> Prefill RoPE Embedding</td>
-                <td>54.37</td>
-                <td>28.3% <span class="sub">(145.1 GB/s)</span></td>
-                <td>0.3% <span class="sub">(0.25 TFLOP/s)</span></td>
-                <td class="ai-cell">1.73</td>
-                <td>65.9%</td>
-                <td>31</td>
-                <td>0</td>
-            </tr>
-            <tr>
-                <td class="stage-cell">stage-1-vllm</td>
-                <td><span class='badge badge-prefill'>Prefill</span> Prefill void vllm::reshape_and_cache</td>
-                <td>29.92</td>
-                <td>13.9% <span class="sub">(71.4 GB/s)</span></td>
-                <td>0.1% <span class="sub">(0.07 TFLOP/s)</span></td>
-                <td class="ai-cell">0.98</td>
-                <td>49.3%</td>
-                <td>48</td>
-                <td>0</td>
-            </tr>
-            <tr>
-                <td class="stage-cell">stage-1-vllm</td>
-                <td><span class='badge badge-prefill'>Prefill</span> Prefill Attention (FlashDecode/SplitKV)</td>
-                <td>739.65</td>
-                <td>2.2% <span class="sub">(11.4 GB/s)</span></td>
-                <td>18.7% <span class="sub">(18.66 TFLOP/s)</span></td>
-                <td class="ai-cell">1629.25</td>
-                <td>8.3%</td>
-                <td>254</td>
-                <td>0</td>
-            </tr>
-            <tr>
-                <td class="stage-cell">stage-1-vllm</td>
-                <td><span class='badge badge-prefill'>Prefill</span> Prefill SwiGLU Activation</td>
-                <td>240.26</td>
-                <td>67.2% <span class="sub">(344.2 GB/s)</span></td>
-                <td>2.0% <span class="sub">(1.99 TFLOP/s)</span></td>
-                <td class="ai-cell">5.77</td>
-                <td>61.4%</td>
-                <td>37</td>
-                <td>0</td>
-            </tr>
-            <tr>
-                <td class="stage-cell">stage-1-vllm</td>
-                <td><span class='badge badge-decode'>Decode</span> Decode Fused RMSNorm</td>
-                <td>7.46</td>
-                <td>1.5% <span class="sub">(7.6 GB/s)</span></td>
-                <td>0.0% <span class="sub">(0.01 TFLOP/s)</span></td>
-                <td class="ai-cell">1.58</td>
-                <td>56.5%</td>
-                <td>38</td>
-                <td>0</td>
-            </tr>
-            <tr>
-                <td class="stage-cell">stage-1-vllm</td>
-                <td><span class='badge badge-decode'>Decode</span> Decode Linear GEMM</td>
-                <td>174.91</td>
-                <td>63.6% <span class="sub">(325.6 GB/s)</span></td>
-                <td>5.0% <span class="sub">(5.04 TFLOP/s)</span></td>
-                <td class="ai-cell">15.47</td>
-                <td>10.1%</td>
-                <td>124</td>
-                <td>0</td>
-            </tr>
-            <tr>
-                <td class="stage-cell">stage-1-vllm</td>
-                <td><span class='badge badge-decode'>Decode</span> Decode RoPE Embedding</td>
-                <td>7.14</td>
-                <td>0.8% <span class="sub">(4.0 GB/s)</span></td>
-                <td>0.0% <span class="sub">(0.01 TFLOP/s)</span></td>
-                <td class="ai-cell">1.42</td>
-                <td>25.9%</td>
-                <td>31</td>
-                <td>0</td>
-            </tr>
-            <tr>
-                <td class="stage-cell">stage-1-vllm</td>
-                <td><span class='badge badge-decode'>Decode</span> Decode void vllm::reshape_and_cache</td>
-                <td>7.97</td>
-                <td>0.7% <span class="sub">(3.5 GB/s)</span></td>
-                <td>0.0% <span class="sub">(0.00 TFLOP/s)</span></td>
-                <td class="ai-cell">0.22</td>
-                <td>13.8%</td>
-                <td>48</td>
-                <td>0</td>
-            </tr>
-            <tr>
-                <td class="stage-cell">stage-1-vllm</td>
-                <td><span class='badge badge-decode'>Decode</span> Decode Attention (FlashDecode/SplitKV)</td>
-                <td>205.25</td>
-                <td>2.1% <span class="sub">(10.7 GB/s)</span></td>
-                <td>4.2% <span class="sub">(4.20 TFLOP/s)</span></td>
-                <td class="ai-cell">392.96</td>
-                <td>8.4%</td>
-                <td>254</td>
-                <td>0</td>
-            </tr>
-            <tr>
-                <td class="stage-cell">stage-1-vllm</td>
-                <td><span class='badge badge-decode'>Decode</span> Decode SwiGLU Activation</td>
-                <td>9.12</td>
-                <td>4.8% <span class="sub">(24.5 GB/s)</span></td>
-                <td>0.2% <span class="sub">(0.15 TFLOP/s)</span></td>
-                <td class="ai-cell">6.25</td>
-                <td>41.7%</td>
-                <td>27</td>
-                <td>0</td>
-            </tr></tbody>
+        <tr class="ncu-row "
+            data-stage="stage-0-vllm"
+            data-phase="prefill"
+            data-group="Prefill Linear (GEMM/GEMV)"
+            data-core="true">
+            <td class="stage-cell"><span class="stage-dot" style="background:#ff2a2a;"></span>stage-0-vllm</td>
+            <td><span class='badge badge-prefill'>Prefill</span> Prefill Linear GEMM</td>
+            <td>4125.15</td>
+            <td>5.5% <span class="sub">(28.2 GB/s)</span></td>
+            <td>27.3% <span class="sub">(27.35 TFLOP/s)</span></td>
+            <td class="ai-cell">969.48</td>
+            <td>16.6%</td>
+            <td>232</td>
+            <td>0</td>
+        </tr>
+        <tr class="ncu-row "
+            data-stage="stage-1-vllm"
+            data-phase="prefill"
+            data-group="Prefill Linear (GEMM/GEMV)"
+            data-core="true">
+            <td class="stage-cell"><span class="stage-dot" style="background:#ffffff;"></span>stage-1-vllm</td>
+            <td><span class='badge badge-prefill'>Prefill</span> Prefill Linear GEMM</td>
+            <td>4184.22</td>
+            <td>5.5% <span class="sub">(28.1 GB/s)</span></td>
+            <td>27.0% <span class="sub">(26.96 TFLOP/s)</span></td>
+            <td class="ai-cell">960.81</td>
+            <td>16.6%</td>
+            <td>232</td>
+            <td>0</td>
+        </tr>
+        <tr class="ncu-row group-start"
+            data-stage="stage-0-vllm"
+            data-phase="prefill"
+            data-group="Prefill Attention"
+            data-core="true">
+            <td class="stage-cell"><span class="stage-dot" style="background:#ff2a2a;"></span>stage-0-vllm</td>
+            <td><span class='badge badge-prefill'>Prefill</span> Prefill Attention (FlashDecode/SplitKV)</td>
+            <td>732.58</td>
+            <td>2.3% <span class="sub">(11.6 GB/s)</span></td>
+            <td>18.8% <span class="sub">(18.84 TFLOP/s)</span></td>
+            <td class="ai-cell">1631.02</td>
+            <td>8.3%</td>
+            <td>254</td>
+            <td>0</td>
+        </tr>
+        <tr class="ncu-row "
+            data-stage="stage-1-vllm"
+            data-phase="prefill"
+            data-group="Prefill Attention"
+            data-core="true">
+            <td class="stage-cell"><span class="stage-dot" style="background:#ffffff;"></span>stage-1-vllm</td>
+            <td><span class='badge badge-prefill'>Prefill</span> Prefill Attention (FlashDecode/SplitKV)</td>
+            <td>739.65</td>
+            <td>2.2% <span class="sub">(11.4 GB/s)</span></td>
+            <td>18.7% <span class="sub">(18.66 TFLOP/s)</span></td>
+            <td class="ai-cell">1629.25</td>
+            <td>8.3%</td>
+            <td>254</td>
+            <td>0</td>
+        </tr>
+        <tr class="ncu-row group-start"
+            data-stage="stage-0-vllm"
+            data-phase="prefill"
+            data-group="Prefill Fused RMSNorm"
+            data-core="false">
+            <td class="stage-cell"><span class="stage-dot" style="background:#ff2a2a;"></span>stage-0-vllm</td>
+            <td><span class='badge badge-prefill'>Prefill</span> Prefill Fused RMSNorm</td>
+            <td>45.41</td>
+            <td>54.2% <span class="sub">(277.5 GB/s)</span></td>
+            <td>0.5% <span class="sub">(0.46 TFLOP/s)</span></td>
+            <td class="ai-cell">1.66</td>
+            <td>84.5%</td>
+            <td>38</td>
+            <td>0</td>
+        </tr>
+        <tr class="ncu-row "
+            data-stage="stage-1-vllm"
+            data-phase="prefill"
+            data-group="Prefill Fused RMSNorm"
+            data-core="false">
+            <td class="stage-cell"><span class="stage-dot" style="background:#ffffff;"></span>stage-1-vllm</td>
+            <td><span class='badge badge-prefill'>Prefill</span> Prefill Fused RMSNorm</td>
+            <td>45.18</td>
+            <td>54.5% <span class="sub">(278.9 GB/s)</span></td>
+            <td>0.5% <span class="sub">(0.46 TFLOP/s)</span></td>
+            <td class="ai-cell">1.66</td>
+            <td>89.2%</td>
+            <td>38</td>
+            <td>0</td>
+        </tr>
+        <tr class="ncu-row group-start"
+            data-stage="stage-0-vllm"
+            data-phase="prefill"
+            data-group="Prefill SwiGLU Activation"
+            data-core="false">
+            <td class="stage-cell"><span class="stage-dot" style="background:#ff2a2a;"></span>stage-0-vllm</td>
+            <td><span class='badge badge-prefill'>Prefill</span> Prefill SwiGLU Activation</td>
+            <td>246.37</td>
+            <td>67.0% <span class="sub">(343.1 GB/s)</span></td>
+            <td>1.9% <span class="sub">(1.94 TFLOP/s)</span></td>
+            <td class="ai-cell">5.64</td>
+            <td>66.6%</td>
+            <td>37</td>
+            <td>0</td>
+        </tr>
+        <tr class="ncu-row "
+            data-stage="stage-1-vllm"
+            data-phase="prefill"
+            data-group="Prefill SwiGLU Activation"
+            data-core="false">
+            <td class="stage-cell"><span class="stage-dot" style="background:#ffffff;"></span>stage-1-vllm</td>
+            <td><span class='badge badge-prefill'>Prefill</span> Prefill SwiGLU Activation</td>
+            <td>240.26</td>
+            <td>67.2% <span class="sub">(344.2 GB/s)</span></td>
+            <td>2.0% <span class="sub">(1.99 TFLOP/s)</span></td>
+            <td class="ai-cell">5.77</td>
+            <td>61.4%</td>
+            <td>37</td>
+            <td>0</td>
+        </tr>
+        <tr class="ncu-row group-start"
+            data-stage="stage-0-vllm"
+            data-phase="prefill"
+            data-group="Prefill RoPE Embedding"
+            data-core="false">
+            <td class="stage-cell"><span class="stage-dot" style="background:#ff2a2a;"></span>stage-0-vllm</td>
+            <td><span class='badge badge-prefill'>Prefill</span> Prefill RoPE Embedding</td>
+            <td>54.82</td>
+            <td>28.1% <span class="sub">(143.9 GB/s)</span></td>
+            <td>0.2% <span class="sub">(0.25 TFLOP/s)</span></td>
+            <td class="ai-cell">1.73</td>
+            <td>65.3%</td>
+            <td>31</td>
+            <td>0</td>
+        </tr>
+        <tr class="ncu-row "
+            data-stage="stage-1-vllm"
+            data-phase="prefill"
+            data-group="Prefill RoPE Embedding"
+            data-core="false">
+            <td class="stage-cell"><span class="stage-dot" style="background:#ffffff;"></span>stage-1-vllm</td>
+            <td><span class='badge badge-prefill'>Prefill</span> Prefill RoPE Embedding</td>
+            <td>54.37</td>
+            <td>28.3% <span class="sub">(145.1 GB/s)</span></td>
+            <td>0.3% <span class="sub">(0.25 TFLOP/s)</span></td>
+            <td class="ai-cell">1.73</td>
+            <td>65.9%</td>
+            <td>31</td>
+            <td>0</td>
+        </tr>
+        <tr class="ncu-row group-start"
+            data-stage="stage-0-vllm"
+            data-phase="prefill"
+            data-group="Prefill KV Cache Write"
+            data-core="false">
+            <td class="stage-cell"><span class="stage-dot" style="background:#ff2a2a;"></span>stage-0-vllm</td>
+            <td><span class='badge badge-prefill'>Prefill</span> Prefill void vllm::reshape_and_cache</td>
+            <td>28.03</td>
+            <td>14.9% <span class="sub">(76.2 GB/s)</span></td>
+            <td>0.1% <span class="sub">(0.07 TFLOP/s)</span></td>
+            <td class="ai-cell">0.98</td>
+            <td>45.0%</td>
+            <td>48</td>
+            <td>0</td>
+        </tr>
+        <tr class="ncu-row "
+            data-stage="stage-1-vllm"
+            data-phase="prefill"
+            data-group="Prefill KV Cache Write"
+            data-core="false">
+            <td class="stage-cell"><span class="stage-dot" style="background:#ffffff;"></span>stage-1-vllm</td>
+            <td><span class='badge badge-prefill'>Prefill</span> Prefill void vllm::reshape_and_cache</td>
+            <td>29.92</td>
+            <td>13.9% <span class="sub">(71.4 GB/s)</span></td>
+            <td>0.1% <span class="sub">(0.07 TFLOP/s)</span></td>
+            <td class="ai-cell">0.98</td>
+            <td>49.3%</td>
+            <td>48</td>
+            <td>0</td>
+        </tr>
+        <tr class="ncu-row group-start"
+            data-stage="stage-0-vllm"
+            data-phase="decode"
+            data-group="Decode Linear (GEMM/GEMV)"
+            data-core="true">
+            <td class="stage-cell"><span class="stage-dot" style="background:#ff2a2a;"></span>stage-0-vllm</td>
+            <td><span class='badge badge-decode'>Decode</span> Decode Linear GEMV</td>
+            <td>177.70</td>
+            <td>62.7% <span class="sub">(321.1 GB/s)</span></td>
+            <td>0.3% <span class="sub">(0.32 TFLOP/s)</span></td>
+            <td class="ai-cell">1.00</td>
+            <td>24.4%</td>
+            <td>164</td>
+            <td>0</td>
+        </tr>
+        <tr class="ncu-row "
+            data-stage="stage-1-vllm"
+            data-phase="decode"
+            data-group="Decode Linear (GEMM/GEMV)"
+            data-core="true">
+            <td class="stage-cell"><span class="stage-dot" style="background:#ffffff;"></span>stage-1-vllm</td>
+            <td><span class='badge badge-decode'>Decode</span> Decode Linear GEMM</td>
+            <td>174.91</td>
+            <td>63.6% <span class="sub">(325.6 GB/s)</span></td>
+            <td>5.0% <span class="sub">(5.04 TFLOP/s)</span></td>
+            <td class="ai-cell">15.47</td>
+            <td>10.1%</td>
+            <td>124</td>
+            <td>0</td>
+        </tr>
+        <tr class="ncu-row group-start"
+            data-stage="stage-0-vllm"
+            data-phase="decode"
+            data-group="Decode Attention"
+            data-core="true">
+            <td class="stage-cell"><span class="stage-dot" style="background:#ff2a2a;"></span>stage-0-vllm</td>
+            <td><span class='badge badge-decode'>Decode</span> Decode Attention (FlashDecode/SplitKV)</td>
+            <td>26.02</td>
+            <td>16.2% <span class="sub">(82.9 GB/s)</span></td>
+            <td>5.5% <span class="sub">(5.53 TFLOP/s)</span></td>
+            <td class="ai-cell">66.67</td>
+            <td>9.5%</td>
+            <td>241</td>
+            <td>0</td>
+        </tr>
+        <tr class="ncu-row "
+            data-stage="stage-1-vllm"
+            data-phase="decode"
+            data-group="Decode Attention"
+            data-core="true">
+            <td class="stage-cell"><span class="stage-dot" style="background:#ffffff;"></span>stage-1-vllm</td>
+            <td><span class='badge badge-decode'>Decode</span> Decode Attention (FlashDecode/SplitKV)</td>
+            <td>205.25</td>
+            <td>2.1% <span class="sub">(10.7 GB/s)</span></td>
+            <td>4.2% <span class="sub">(4.20 TFLOP/s)</span></td>
+            <td class="ai-cell">392.96</td>
+            <td>8.4%</td>
+            <td>254</td>
+            <td>0</td>
+        </tr>
+        <tr class="ncu-row group-start"
+            data-stage="stage-0-vllm"
+            data-phase="decode"
+            data-group="Decode Attention Combine"
+            data-core="false">
+            <td class="stage-cell"><span class="stage-dot" style="background:#ff2a2a;"></span>stage-0-vllm</td>
+            <td><span class='badge badge-decode'>Decode</span> Decode Attention Combine (Split-K)</td>
+            <td>21.63</td>
+            <td>1.2% <span class="sub">(5.9 GB/s)</span></td>
+            <td>0.0% <span class="sub">(0.00 TFLOP/s)</span></td>
+            <td class="ai-cell">0.50</td>
+            <td>8.3%</td>
+            <td>60</td>
+            <td>0</td>
+        </tr>
+        <tr class="ncu-row group-start"
+            data-stage="stage-0-vllm"
+            data-phase="decode"
+            data-group="Decode Fused RMSNorm"
+            data-core="false">
+            <td class="stage-cell"><span class="stage-dot" style="background:#ff2a2a;"></span>stage-0-vllm</td>
+            <td><span class='badge badge-decode'>Decode</span> Decode Fused RMSNorm</td>
+            <td>7.01</td>
+            <td>0.7% <span class="sub">(3.7 GB/s)</span></td>
+            <td>0.0% <span class="sub">(0.00 TFLOP/s)</span></td>
+            <td class="ai-cell">0.29</td>
+            <td>13.3%</td>
+            <td>40</td>
+            <td>0</td>
+        </tr>
+        <tr class="ncu-row "
+            data-stage="stage-1-vllm"
+            data-phase="decode"
+            data-group="Decode Fused RMSNorm"
+            data-core="false">
+            <td class="stage-cell"><span class="stage-dot" style="background:#ffffff;"></span>stage-1-vllm</td>
+            <td><span class='badge badge-decode'>Decode</span> Decode Fused RMSNorm</td>
+            <td>7.46</td>
+            <td>1.5% <span class="sub">(7.6 GB/s)</span></td>
+            <td>0.0% <span class="sub">(0.01 TFLOP/s)</span></td>
+            <td class="ai-cell">1.58</td>
+            <td>56.5%</td>
+            <td>38</td>
+            <td>0</td>
+        </tr>
+        <tr class="ncu-row group-start"
+            data-stage="stage-0-vllm"
+            data-phase="decode"
+            data-group="Decode SwiGLU Activation"
+            data-core="false">
+            <td class="stage-cell"><span class="stage-dot" style="background:#ff2a2a;"></span>stage-0-vllm</td>
+            <td><span class='badge badge-decode'>Decode</span> Decode SwiGLU Activation</td>
+            <td>9.63</td>
+            <td>0.9% <span class="sub">(4.7 GB/s)</span></td>
+            <td>0.0% <span class="sub">(0.02 TFLOP/s)</span></td>
+            <td class="ai-cell">5.17</td>
+            <td>52.7%</td>
+            <td>27</td>
+            <td>0</td>
+        </tr>
+        <tr class="ncu-row "
+            data-stage="stage-1-vllm"
+            data-phase="decode"
+            data-group="Decode SwiGLU Activation"
+            data-core="false">
+            <td class="stage-cell"><span class="stage-dot" style="background:#ffffff;"></span>stage-1-vllm</td>
+            <td><span class='badge badge-decode'>Decode</span> Decode SwiGLU Activation</td>
+            <td>9.12</td>
+            <td>4.8% <span class="sub">(24.5 GB/s)</span></td>
+            <td>0.2% <span class="sub">(0.15 TFLOP/s)</span></td>
+            <td class="ai-cell">6.25</td>
+            <td>41.7%</td>
+            <td>27</td>
+            <td>0</td>
+        </tr>
+        <tr class="ncu-row group-start"
+            data-stage="stage-0-vllm"
+            data-phase="decode"
+            data-group="Decode RoPE Embedding"
+            data-core="false">
+            <td class="stage-cell"><span class="stage-dot" style="background:#ff2a2a;"></span>stage-0-vllm</td>
+            <td><span class='badge badge-decode'>Decode</span> Decode RoPE Embedding</td>
+            <td>7.20</td>
+            <td>0.2% <span class="sub">(1.2 GB/s)</span></td>
+            <td>0.0% <span class="sub">(0.00 TFLOP/s)</span></td>
+            <td class="ai-cell">0.74</td>
+            <td>25.6%</td>
+            <td>31</td>
+            <td>0</td>
+        </tr>
+        <tr class="ncu-row "
+            data-stage="stage-1-vllm"
+            data-phase="decode"
+            data-group="Decode RoPE Embedding"
+            data-core="false">
+            <td class="stage-cell"><span class="stage-dot" style="background:#ffffff;"></span>stage-1-vllm</td>
+            <td><span class='badge badge-decode'>Decode</span> Decode RoPE Embedding</td>
+            <td>7.14</td>
+            <td>0.8% <span class="sub">(4.0 GB/s)</span></td>
+            <td>0.0% <span class="sub">(0.01 TFLOP/s)</span></td>
+            <td class="ai-cell">1.42</td>
+            <td>25.9%</td>
+            <td>31</td>
+            <td>0</td>
+        </tr>
+        <tr class="ncu-row group-start"
+            data-stage="stage-0-vllm"
+            data-phase="decode"
+            data-group="Decode KV Cache Write"
+            data-core="false">
+            <td class="stage-cell"><span class="stage-dot" style="background:#ff2a2a;"></span>stage-0-vllm</td>
+            <td><span class='badge badge-decode'>Decode</span> Decode void vllm::reshape_and_cache</td>
+            <td>8.96</td>
+            <td>0.5% <span class="sub">(2.5 GB/s)</span></td>
+            <td>0.0% <span class="sub">(0.00 TFLOP/s)</span></td>
+            <td class="ai-cell">0.04</td>
+            <td>16.9%</td>
+            <td>48</td>
+            <td>0</td>
+        </tr>
+        <tr class="ncu-row "
+            data-stage="stage-1-vllm"
+            data-phase="decode"
+            data-group="Decode KV Cache Write"
+            data-core="false">
+            <td class="stage-cell"><span class="stage-dot" style="background:#ffffff;"></span>stage-1-vllm</td>
+            <td><span class='badge badge-decode'>Decode</span> Decode void vllm::reshape_and_cache</td>
+            <td>7.97</td>
+            <td>0.7% <span class="sub">(3.5 GB/s)</span></td>
+            <td>0.0% <span class="sub">(0.00 TFLOP/s)</span></td>
+            <td class="ai-cell">0.22</td>
+            <td>13.8%</td>
+            <td>48</td>
+            <td>0</td>
+        </tr></tbody>
             </table>
         </div>
     </div>
     
+
+    <script>
+        const ROOFLINE_STAGE_DATA = [{"stage": "stage-0-vllm", "kernels": [{"x": 1.658, "y": 0.46, "label": "Prefill Fused RMSNorm", "phase": "Prefill", "phase_lower": "prefill", "group": "Prefill Fused RMSNorm", "is_core": false, "exec_us": 45.41, "dram_gbps": 277.54, "symbol": "diamond"}, {"x": 969.482, "y": 27.348, "label": "Prefill Linear GEMM", "phase": "Prefill", "phase_lower": "prefill", "group": "Prefill Linear (GEMM/GEMV)", "is_core": true, "exec_us": 4125.15, "dram_gbps": 28.21, "symbol": "diamond"}, {"x": 1.729, "y": 0.249, "label": "Prefill RoPE Embedding", "phase": "Prefill", "phase_lower": "prefill", "group": "Prefill RoPE Embedding", "is_core": false, "exec_us": 54.82, "dram_gbps": 143.86, "symbol": "diamond"}, {"x": 0.982, "y": 0.075, "label": "Prefill void vllm::reshape_and_cache", "phase": "Prefill", "phase_lower": "prefill", "group": "Prefill KV Cache Write", "is_core": false, "exec_us": 28.03, "dram_gbps": 76.15, "symbol": "diamond"}, {"x": 1631.024, "y": 18.838, "label": "Prefill Attention (FlashDecode/SplitKV)", "phase": "Prefill", "phase_lower": "prefill", "group": "Prefill Attention", "is_core": true, "exec_us": 732.58, "dram_gbps": 11.55, "symbol": "diamond"}, {"x": 5.644, "y": 1.937, "label": "Prefill SwiGLU Activation", "phase": "Prefill", "phase_lower": "prefill", "group": "Prefill SwiGLU Activation", "is_core": false, "exec_us": 246.37, "dram_gbps": 343.14, "symbol": "diamond"}, {"x": 0.295, "y": 0.001, "label": "Decode Fused RMSNorm", "phase": "Decode", "phase_lower": "decode", "group": "Decode Fused RMSNorm", "is_core": false, "exec_us": 7.01, "dram_gbps": 3.73, "symbol": "circle"}, {"x": 1.001, "y": 0.321, "label": "Decode Linear GEMV", "phase": "Decode", "phase_lower": "decode", "group": "Decode Linear (GEMM/GEMV)", "is_core": true, "exec_us": 177.7, "dram_gbps": 321.1, "symbol": "circle"}, {"x": 0.743, "y": 0.001, "label": "Decode RoPE Embedding", "phase": "Decode", "phase_lower": "decode", "group": "Decode RoPE Embedding", "is_core": false, "exec_us": 7.2, "dram_gbps": 1.24, "symbol": "circle"}, {"x": 0.045, "y": 0.0001143, "label": "Decode void vllm::reshape_and_cache", "phase": "Decode", "phase_lower": "decode", "group": "Decode KV Cache Write", "is_core": false, "exec_us": 8.96, "dram_gbps": 2.54, "symbol": "circle"}, {"x": 66.669, "y": 5.525, "label": "Decode Attention (FlashDecode/SplitKV)", "phase": "Decode", "phase_lower": "decode", "group": "Decode Attention", "is_core": true, "exec_us": 26.02, "dram_gbps": 82.87, "symbol": "circle"}, {"x": 0.497, "y": 0.003, "label": "Decode Attention Combine (Split-K)", "phase": "Decode", "phase_lower": "decode", "group": "Decode Attention Combine", "is_core": false, "exec_us": 21.63, "dram_gbps": 5.89, "symbol": "circle"}, {"x": 5.17, "y": 0.024, "label": "Decode SwiGLU Activation", "phase": "Decode", "phase_lower": "decode", "group": "Decode SwiGLU Activation", "is_core": false, "exec_us": 9.63, "dram_gbps": 4.68, "symbol": "circle"}]}, {"stage": "stage-1-vllm", "kernels": [{"x": 1.658, "y": 0.462, "label": "Prefill Fused RMSNorm", "phase": "Prefill", "phase_lower": "prefill", "group": "Prefill Fused RMSNorm", "is_core": false, "exec_us": 45.18, "dram_gbps": 278.91, "symbol": "diamond"}, {"x": 960.813, "y": 26.962, "label": "Prefill Linear GEMM", "phase": "Prefill", "phase_lower": "prefill", "group": "Prefill Linear (GEMM/GEMV)", "is_core": true, "exec_us": 4184.22, "dram_gbps": 28.06, "symbol": "diamond"}, {"x": 1.729, "y": 0.251, "label": "Prefill RoPE Embedding", "phase": "Prefill", "phase_lower": "prefill", "group": "Prefill RoPE Embedding", "is_core": false, "exec_us": 54.37, "dram_gbps": 145.05, "symbol": "diamond"}, {"x": 0.982, "y": 0.07, "label": "Prefill void vllm::reshape_and_cache", "phase": "Prefill", "phase_lower": "prefill", "group": "Prefill KV Cache Write", "is_core": false, "exec_us": 29.92, "dram_gbps": 71.36, "symbol": "diamond"}, {"x": 1629.25, "y": 18.658, "label": "Prefill Attention (FlashDecode/SplitKV)", "phase": "Prefill", "phase_lower": "prefill", "group": "Prefill Attention", "is_core": true, "exec_us": 739.65, "dram_gbps": 11.45, "symbol": "diamond"}, {"x": 5.769, "y": 1.986, "label": "Prefill SwiGLU Activation", "phase": "Prefill", "phase_lower": "prefill", "group": "Prefill SwiGLU Activation", "is_core": false, "exec_us": 240.26, "dram_gbps": 344.19, "symbol": "diamond"}, {"x": 1.576, "y": 0.012, "label": "Decode Fused RMSNorm", "phase": "Decode", "phase_lower": "decode", "group": "Decode Fused RMSNorm", "is_core": false, "exec_us": 7.46, "dram_gbps": 7.59, "symbol": "circle"}, {"x": 15.473, "y": 5.037, "label": "Decode Linear GEMM", "phase": "Decode", "phase_lower": "decode", "group": "Decode Linear (GEMM/GEMV)", "is_core": true, "exec_us": 174.91, "dram_gbps": 325.56, "symbol": "circle"}, {"x": 1.418, "y": 0.006, "label": "Decode RoPE Embedding", "phase": "Decode", "phase_lower": "decode", "group": "Decode RoPE Embedding", "is_core": false, "exec_us": 7.14, "dram_gbps": 3.95, "symbol": "circle"}, {"x": 0.222, "y": 0.001, "label": "Decode void vllm::reshape_and_cache", "phase": "Decode", "phase_lower": "decode", "group": "Decode KV Cache Write", "is_core": false, "exec_us": 7.97, "dram_gbps": 3.47, "symbol": "circle"}, {"x": 392.964, "y": 4.202, "label": "Decode Attention (FlashDecode/SplitKV)", "phase": "Decode", "phase_lower": "decode", "group": "Decode Attention", "is_core": true, "exec_us": 205.25, "dram_gbps": 10.69, "symbol": "circle"}, {"x": 6.247, "y": 0.153, "label": "Decode SwiGLU Activation", "phase": "Decode", "phase_lower": "decode", "group": "Decode SwiGLU Activation", "is_core": false, "exec_us": 9.12, "dram_gbps": 24.53, "symbol": "circle"}]}];
+        let currentRooflinePhase = 'all';
+        let currentNcuPhase = 'all';
+
+        function setRooflinePhase(phase) {
+            currentRooflinePhase = phase;
+            document.querySelectorAll('#roofline-phase-pills .pill').forEach(btn => {
+                btn.classList.toggle('active', btn.getAttribute('data-phase') === phase);
+            });
+            filterRooflinePlot();
+        }
+
+        function filterRooflinePlot() {
+            const plotDiv = document.getElementById('roofline-plot');
+            if (!plotDiv || !ROOFLINE_STAGE_DATA.length) return;
+
+            const kernelMode = document.getElementById('roofline-kernel-select').value;
+            const stageMode = document.getElementById('roofline-stage-select').value;
+
+            // Step 1: Filter visible kernels per stage
+            const filteredByStage = ROOFLINE_STAGE_DATA.map(sObj => {
+                const matchStage = (stageMode === 'all') || (sObj.stage === stageMode);
+                if (!matchStage) return [];
+                return sObj.kernels.filter(k => {
+                    const matchPhase = (currentRooflinePhase === 'all') || (k.phase_lower === currentRooflinePhase);
+                    let matchKernel = true;
+                    if (kernelMode === 'core') {
+                        matchKernel = k.is_core;
+                    } else if (kernelMode !== 'all') {
+                        matchKernel = (k.group === kernelMode);
+                    }
+                    return matchPhase && matchKernel;
+                });
+            });
+
+            // Step 2: Detect overlapping points across stages in log-space
+            // so we don't double-stamp text and can append "(×N)" on the top trace
+            const eps = 0.03; // ~7% log10 proximity threshold
+            const clusters = [];
+            filteredByStage.forEach((ks, sIdx) => {
+                ks.forEach((k, kIdx) => {
+                    const lx = Math.log10(k.x);
+                    const ly = Math.log10(k.y);
+                    let found = clusters.find(c => Math.abs(c.lx - lx) < eps && Math.abs(c.ly - ly) < eps);
+                    if (!found) {
+                        found = { lx, ly, members: [] };
+                        clusters.push(found);
+                    }
+                    found.members.push({ sIdx, kIdx, stage: ROOFLINE_STAGE_DATA[sIdx].stage, label: k.label });
+                });
+            });
+
+            const xs = [];
+            const ys = [];
+            const texts = [];
+            const cdatas = [];
+            const symbols = [];
+            const traceIndices = [];
+
+            filteredByStage.forEach((ks, sIdx) => {
+                traceIndices.push(sIdx + 1); // Trace 0 is the fixed Hardware Ceiling line
+                xs.push(ks.map(k => k.x));
+                ys.push(ks.map(k => k.y));
+                symbols.push(ks.map(k => k.symbol));
+
+                const stageTexts = [];
+                const stageCdatas = [];
+
+                ks.forEach((k, kIdx) => {
+                    const lx = Math.log10(k.x);
+                    const ly = Math.log10(k.y);
+                    const cluster = clusters.find(c => Math.abs(c.lx - lx) < eps && Math.abs(c.ly - ly) < eps);
+                    const count = cluster ? cluster.members.length : 1;
+                    const lastMember = cluster ? cluster.members[cluster.members.length - 1] : null;
+                    const stageNames = cluster ? cluster.members.map(m => m.stage).join(' & ') : ROOFLINE_STAGE_DATA[sIdx].stage;
+
+                    // Only draw the text label on the top-most overlapping marker to keep font crisp
+                    if (count > 1) {
+                        if (lastMember && lastMember.sIdx === sIdx && lastMember.kIdx === kIdx) {
+                            stageTexts.push(`${k.label} (×${count})`);
+                        } else {
+                            stageTexts.push('');
+                        }
+                    } else {
+                        stageTexts.push(k.label);
+                    }
+
+                    stageCdatas.push([k.phase, k.exec_us, k.dram_gbps, k.label, stageNames]);
+                });
+
+                texts.push(stageTexts);
+                cdatas.push(stageCdatas);
+            });
+
+            Plotly.restyle(plotDiv, {
+                x: xs,
+                y: ys,
+                text: texts,
+                customdata: cdatas,
+                'marker.symbol': symbols
+            }, traceIndices);
+        }
+
+        function setNcuPhase(phase) {
+            currentNcuPhase = phase;
+            document.querySelectorAll('#ncu-phase-pills .pill').forEach(btn => {
+                btn.classList.toggle('active', btn.getAttribute('data-phase') === phase);
+            });
+            filterNcuTable();
+        }
+
+        function filterNcuTable() {
+            const kernelMode = document.getElementById('ncu-kernel-select').value;
+            const stageMode = document.getElementById('ncu-stage-select').value;
+            const rows = document.querySelectorAll('#ncu-table tbody tr.ncu-row');
+
+            let prevVisibleGroup = null;
+            rows.forEach(row => {
+                const rPhase = row.getAttribute('data-phase');
+                const rGroup = row.getAttribute('data-group');
+                const rStage = row.getAttribute('data-stage');
+                const rCore = row.getAttribute('data-core') === 'true';
+
+                const matchPhase = (currentNcuPhase === 'all') || (rPhase === currentNcuPhase);
+                const matchStage = (stageMode === 'all') || (rStage === stageMode);
+                let matchKernel = true;
+                if (kernelMode === 'core') {
+                    matchKernel = rCore;
+                } else if (kernelMode !== 'all') {
+                    matchKernel = (rGroup === kernelMode);
+                }
+
+                if (matchPhase && matchStage && matchKernel) {
+                    row.style.display = '';
+                    row.classList.toggle('group-start', prevVisibleGroup !== null && prevVisibleGroup !== rGroup);
+                    prevVisibleGroup = rGroup;
+                } else {
+                    row.style.display = 'none';
+                    row.classList.remove('group-start');
+                }
+            });
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            filterNcuTable();
+            filterRooflinePlot();
+        });
+    </script>
 </body>
 </html>
