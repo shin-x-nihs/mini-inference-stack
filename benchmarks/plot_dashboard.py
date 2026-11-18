@@ -1100,6 +1100,15 @@ def main():
         raise SystemExit(f"No valid stage directories found in '{base_dir}'.")
 
     stages_data = [load_stage_data(d) for d in stage_dirs]
+    # Filter out empty directories that contain no benchmark or profiling data
+    stages_data = [
+        s for s in stages_data
+        if s["pareto"] or s["context"] or s["nsys"] or s["ncu"]
+    ]
+
+    if not stages_data:
+        raise SystemExit(f"No benchmark data found in stage directories of '{base_dir}'.")
+
     out_file = Path(args.output) if args.output else (base_dir / "dashboard.html")
     generate_dashboard(stages_data, out_file)
 

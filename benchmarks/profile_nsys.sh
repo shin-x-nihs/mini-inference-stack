@@ -98,12 +98,13 @@ with urllib.request.urlopen(req, timeout=120) as resp:
 EOF
 }
 
-# Reset any stuck collection from a previous interrupted run
-nsys stop >/dev/null 2>&1 || true
+# Reset any stuck collection from a previous interrupted run if active
+if nsys status 2>&1 | grep -iq "collection is in progress"; then
+    nsys stop >/dev/null 2>&1 || true
+fi
 
-# 3. Warmup pass (unprofiled)
-echo ">>> [1/5] Running unprofiled warmup request..."
-run_probe
+# 3. Warmup pass (vLLM already warmed up during startup engine initialization)
+echo ">>> [1/5] Engine initialized and warmed up during startup."
 
 # 4. Profiled pass (bare start/stop to avoid reconfiguring the launched session)
 echo ">>> [2/5] Capturing Nsight Systems trace..."
