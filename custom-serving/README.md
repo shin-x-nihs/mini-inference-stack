@@ -21,7 +21,7 @@ Establishes an unoptimized lower bound with no KV cache, no `F.scaled_dot_produc
 
 Eliminates redundant decode sequence recomputation while remaining pure eager PyTorch (no SDPA/FlashAttention):
 
-- **`model.py`**: Caches per-layer unexpanded `(k, v)` tensors (`list[tuple[torch.Tensor, torch.Tensor]]` of shape `[B, 2, S_total, 128]`), applies `RotaryEmbedding` with a `start_pos` offset to newly arrived tokens before `torch.cat` and GQA `repeat_interleave` (`2 -> 12` heads), skips causal mask allocation/application during single-token `[1, 1]` decode, and wraps attention compute in an `attn_compute` NVTX range.
+- **`model.py`**: Caches per-layer unexpanded `(k, v)` tensors (`list[tuple[torch.Tensor, torch.Tensor]]` of shape `[B, 2, S_total, 128]`), applies `RotaryEmbedding` with a `position_offset` to newly arrived tokens before `torch.cat` and GQA `repeat_interleave` (`2 -> 12` heads), skips causal mask allocation/application during single-token `[1, 1]` decode, and wraps attention compute in an `attn_compute` NVTX range.
 - **`engine.py`**: Prefills `[1, L]` once inside `prefill_step` to initialize `past_key_values`, then feeds only the newly sampled `[1, 1]` token tensor on each `decode_step` ($O(S)$ per-step attention instead of $O(S^2)$) and releases KV cache references on exit.
 - **`server.py` & `serve.sh`**: Self-contained Stage 1 FastAPI/uvicorn serving snapshot (`stage1-gpu` executor thread) that closes the engine generator in `event_generator()`'s `finally` block so cancelled streams release KV cache memory immediately.
 
