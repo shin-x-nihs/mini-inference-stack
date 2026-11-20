@@ -9,11 +9,21 @@ authors = [
     { name = "shin-x-nihs" },
 ]
 
+# Core UI, dashboard, and custom-serving PyTorch/CUDA 13.0 stack.
+# Note: vllm==0.31.0 (requires mcp>=2.0) conflicts with chainlit>=2.12.0 (requires mcp<2.0)
+# in strict SAT resolution, so vllm is installed into .venv via `uv pip install`.
 dependencies = [
     "chainlit>=2.12.0",
+    "einops>=0.8.2",
+    "fastapi>=0.133.0",
     "openai>=3.31.0",
     "plotly>=7.1.0",
     "pyyaml>=6.0.3",
+    "safetensors>=0.8.0",
+    "torch==2.13.0",
+    "transformers>=5.17.0,<5.18.0",
+    "triton>=3.7.1",
+    "uvicorn>=0.54.0",
 ]
 
 [dependency-groups]
@@ -24,3 +34,12 @@ dev = [
 
 [tool.uv]
 package = false
+environments = ["sys_platform == 'linux' and platform_machine == 'x86_64'"]
+
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cu130" }]
