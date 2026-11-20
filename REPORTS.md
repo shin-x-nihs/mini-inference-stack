@@ -345,13 +345,13 @@ The system bottleneck transitioned across optimization stages:
 #### 1. Motivation
 
 ##### Observation (Stage 0 Baseline: `stage-0-custom`)
-Profiling our naive PyTorch baseline (`Qwen2.5-Coder-1.5B-Instruct`, `bfloat16`, RTX 5080) showed that generation is slow because every decode step recomputes the entire `[1, L + t]` sequence from scratch instead of reusing past Keys and Values:
-* **Decode dominates wall time:** For `1024` input / `64` output tokens ($C=1$), total wall time is **7.12 s** (vs. **867.3 ms** in `stage-0-vllm`), with **97.7%** spent in decode (**6,954.1 ms** total, **110.38 ms/token** avg vs. **10.67 ms/token** in vLLM).
-* **Context length collapses decode speed:** At $C=1$, prefill TTFT at $L=2048$ is reasonable (**275.87 ms** vs. **208.14 ms** in vLLM), but decode TPOT more than doubles every time context doubles: **52.68 ms** ($L=512$) $\to$ **120.72 ms** ($L=1024$) $\to$ **265.51 ms** ($L=2048$, **3.76 tok/s**).
-* **Redundant compute everywhere:** Without a KV cache, every decode token runs $M = S$ linear GEMMs (**64.5%** of GPU time) and $O(S^2)$ materialized attention (**26.7%** of GPU time) across all 28 layers.
+Profiling our naive PyTorch baseline (`Qwen2.5-Coder-1.5B-Instruct`, `bfloat16`, RTX 5080) isolated why uncached autoregressive decoding collapses as sequence length grows:
+* **Phase symmetry anomaly (`nsys` timeline at $C=1, L_{\text{in}}=1024, L_{\text{out}}=64$):** Processing the entire `1,024`-token prompt takes **118.11 ms** (`0.115 ms/token`), whereas generating `63` decode tokens takes **6,954.07 ms** (**97.7%** of the **7,119.30 ms** wall time), or **110.38 ms/token** (vs. **10.67 ms/token** in `stage-0-vllm`). Emitting a single output token costs nearly the same time as prefilling all `1,024` prompt tokens, proving per-step work scales with total context length $S$ rather than $\Delta S = 1$.
+* **Kernel attribution & causal invariance (`cuda_gpu_kern_sum` + `nsys_metrics.json`):** Across the run, linear projections consume **4,181.92 ms** (**64.5%** of GPU time) across **12,320** Tensor Core `GEMM` launches (`64x64` and `128x64` CUTLASS tiles), and attention (`attn_compute`) consumes **1,731.54 ms** (**26.7%** of GPU time)—together accounting for **91.2%** of all GPU execution. Because causal masking prevents past tokens $x_0, \dots, x_{t-1}$ from attending to future token $x_t$, their hidden states $h_{0:t-1}$ and projections ($Q_{0:t-1}, K_{0:t-1}, V_{0:t-1}$) are mathematically invariant across decode steps; recomputing `M = S` GEMMs on every step is pure redundant arithmetic.
+* **Super-linear context scaling (`context_sweep` at $C=1$):** While prefill TTFT at $L=2048$ remains reasonable (**275.87 ms** vs. **208.14 ms** in vLLM), doubling initial context $L$ from `512` $\to$ `1024` $\to$ `2048` more than doubles decode TPOT at each step: **52.68 ms** $\to$ **120.72 ms** $\to$ **265.51 ms** (**3.76 tok/s**).
 
 ##### Hypothesis
-Caching each layer's Key and Value tensors after prefill and only feeding the single newest token ($M=1$) on each decode step will eliminate redundant prompt recomputation. Linear layers drop from $O(S)$ to $O(1)$ work per step, and attention drops from $O(S^2)$ to $O(S)$.
+Memoizing each layer's past Key and Value tensors ($K_{0:t-1}, V_{0:t-1}$) after prefill and feeding only the newly sampled token ($\Delta S = 1$) on each decode step eliminates redundant sequence recomputation. Per-step linear projections collapse from $O(S \cdot d^2)$ (`M = S` Tensor Core `GEMM`) to $O(d^2)$ (`M = 1` `GEMV`), and attention drops from $O(S^2 \cdot d)$ to $O(S \cdot d)$, directly targeting **91.2%** of Stage 0's GPU kernel time.
 
 ##### Expected Results
 * **Decode latency (TPOT):** Sharp drop across all context lengths, flattening the steep TPOT curve at $L=512\text{--}2048$ (and making $L=4096\text{--}8192$ practical to benchmark).
@@ -360,10 +360,103 @@ Caching each layer's Key and Value tensors after prefill and only feeding the si
 
 #### 2. Experiment Setup
 
+| Setting | Value |
+| :--- | :--- |
+| **Target model** | `Qwen/Qwen2.5-Coder-1.5B-Instruct` (`bfloat16`) |
+| **Architecture change** | Per-layer unexpanded `(k, v)` cache (`[B, 2, S, 128]`), offset RoPE, single-token `[1, 1]` decode without causal mask |
+| **Serving & concurrency** | FastAPI SSE + global `asyncio.Lock` serialization (`ThreadPoolExecutor(max_workers=1)`) |
+| **Workloads** | Pareto: `512` in / `128` out (`C = 1..16`); Context: `L = 128..2048` / `64` out (`C = 1`); Profiling: `1024` in / `64` out (`nsys`), `L = 2048` Layer 0 (`ncu`) |
+| **Hardware** | NVIDIA GeForce RTX 5080 Laptop GPU (16 GB GDDR7, `sm_120`), CUDA 13.1, PyTorch 2.13.0+cu130 |
+
+**Validation:**  
+Verified 100% greedy token ID parity (`32/32` tokens, prefill max-abs logit diff `0.062500`) across both `stage-0-baseline` and `stage-1-kv-cache` against HuggingFace `AutoModelForCausalLM(..., attn_implementation="eager")` via `uv run --frozen python custom-serving/test_parity.py --stage all`. All benchmark sweeps completed with `failed: 0`.
+
+---
+
 #### 3. Benchmark Results
+
+##### A. Concurrency Scaling (`Input = 512`, `Output = 128`, `C = 1..16`)
+
+| Concurrency ($C$) | `stage-0-custom` Tput | `stage-1-custom` Tput | Tput $\Delta$ | `stage-0-custom` TPOT | `stage-1-custom` TPOT | TPOT $\Delta$ | `stage-0-custom` Mean TTFT | `stage-1-custom` Mean TTFT | `stage-0-vllm` Tput |
+| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **1** | 14.93 tok/s | 37.33 tok/s | <span style="color:#10b981;">**+150.1% ($2.50\times$)**</span> | 66.84 ms | 26.42 ms | <span style="color:#10b981;">**-60.5%**</span> | 87.53 ms | 74.02 ms | 87.77 tok/s |
+| **2** | 14.83 tok/s | 37.96 tok/s | <span style="color:#10b981;">**+155.9% ($2.56\times$)**</span> | 67.29 ms | 25.98 ms | <span style="color:#10b981;">**-61.4%**</span> | 8,359.90 ms | 3,235.30 ms | 169.46 tok/s |
+| **4** | 14.61 tok/s | 36.42 tok/s | <span style="color:#10b981;">**+149.3% ($2.49\times$)**</span> | 68.41 ms | 27.14 ms | <span style="color:#10b981;">**-60.3%**</span> | 25,087.82 ms | 10,062.36 ms | 353.74 tok/s |
+| **8** | 14.63 tok/s | 39.57 tok/s | <span style="color:#10b981;">**+170.6% ($2.71\times$)**</span> | 68.32 ms | 24.97 ms | <span style="color:#10b981;">**-63.5%**</span> | 58,302.75 ms | 21,598.44 ms | 561.94 tok/s |
+| **16** | 14.61 tok/s | 37.66 tok/s | <span style="color:#10b981;">**+157.8% ($2.58\times$)**</span> | 68.44 ms | 26.27 ms | <span style="color:#10b981;">**-61.6%**</span> | 124,830.53 ms | 48,607.08 ms | 831.19 tok/s |
+
+##### B. Context Length Scaling (`C = 1`, `Output = 64`)
+
+| Context Length ($L$) | `stage-0-custom` TTFT | `stage-1-custom` TTFT | `stage-0-custom` TPOT | `stage-1-custom` TPOT | TPOT $\Delta$ | `stage-0-custom` Tput | `stage-1-custom` Tput | Tput $\Delta$ | `stage-0-vllm` TPOT |
+| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **128** | 59.95 ms | 51.19 ms | 34.67 ms | 22.56 ms | <span style="color:#10b981;">**-34.9% ($1.54\times$)**</span> | 28.51 tok/s | 43.45 tok/s | <span style="color:#10b981;">**+52.4% ($1.52\times$)**</span> | 10.67 ms |
+| **256** | 62.43 ms | 61.89 ms | 41.30 ms | 24.27 ms | <span style="color:#10b981;">**-41.2% ($1.70\times$)**</span> | 24.02 tok/s | 40.21 tok/s | <span style="color:#10b981;">**+67.4% ($1.67\times$)**</span> | 10.75 ms |
+| **512** | 75.70 ms | 77.20 ms | 52.68 ms | 22.64 ms | <span style="color:#10b981;">**-57.0% ($2.33\times$)**</span> | 18.85 tok/s | 42.54 tok/s | <span style="color:#10b981;">**+125.7% ($2.26\times$)**</span> | 10.09 ms |
+| **1024** | 155.44 ms | 144.75 ms | 120.72 ms | 23.38 ms | <span style="color:#10b981;">**-80.6% ($5.16\times$)**</span> | 8.25 tok/s | 39.55 tok/s | <span style="color:#10b981;">**+379.6% ($4.80\times$)**</span> | 8.99 ms |
+| **2048** | 275.87 ms | 330.14 ms | 265.51 ms | 24.09 ms | <span style="color:#10b981;">**-90.9% ($11.02\times$)**</span> | 3.76 tok/s | 34.62 tok/s | <span style="color:#10b981;">**+819.8% ($9.20\times$)**</span> | 10.11 ms |
+
+##### C. Key Takeaways from Benchmarks
+1. **Flat Decode Latency Across Context Length:** In `stage-0-custom`, decode TPOT scaled super-linearly with prompt length (**34.67 ms** at $L=128 \to$ **265.51 ms** at $L=2048$). With the per-layer KV cache in `stage-1-custom`, TPOT stays nearly flat at **22.56–24.27 ms/token** across the entire $L=128\text{--}2048$ sweep—an **$11.02\times$** TPOT reduction (**-90.9%**) and **$9.20\times$** throughput increase (**3.76 $\to$ 34.62 tok/s**) at $L=2048$.
+2. **Throughput Plateaus Under Concurrency (`asyncio.Lock`):** Because requests remain serialized behind `asyncio.Lock` without continuous batching, system throughput stays flat at **~37–39.6 tok/s** across $C=1\text{--}16$ ($2.5\times\text{--}2.7\times$ higher than `stage-0-custom`'s ~14.6 tok/s, while lowering queue-induced mean TTFT at $C=16$ by **61.1%** from 124.8 s to 48.6 s).
+
+---
 
 #### 4. Profiler & Hardware Analysis
 
+##### 1. Nsight Systems Timeline (`C = 1`, `Input = 1024`, `Output = 64`)
+* **Decode Collapse (`6,954.1 ms` $\to$ `1,357.2 ms`):** Total wall time dropped by **76.5%** (**7,119.30 ms $\to$ 1,674.04 ms**), driven by average decode step latency falling **$5.12\times$** from **110.38 ms/step to 21.54 ms/step**.
+* **GPU Active vs. Idle Flip (CPU Launch Bottleneck Exposed):** In `stage-0-custom`, heavy $O(S^2)$ decode kernels kept the GPU active **91.13%** of wall time (**6,487.79 ms**). Once the KV cache shrank decode projections to $M=1$, total GPU active time dropped **$8.49\times$** to **764.32 ms** (**45.66%** active), leaving the GPU **idle 54.34% of the time** (**909.73 ms**). Eager PyTorch still launches **85,058 kernels** (`~1,329` kernels/step) with **647.04 ms** of CPU launch overhead and **0 CUDA graphs** (vs. **28.90 ms** across 1,636 calls and 63 CUDA graphs in `stage-0-vllm`).
+* **Operator Category Breakdown:** Total GPU kernel time fell from **6,487.79 ms to 764.31 ms**:
+  * **Linear GEMM/GEMV:** **4,181.92 ms $\to$ 478.64 ms** (**62.6%** of GPU time, **$8.74\times$ reduction**).
+  * **Attention (`attn_compute`):** **1,731.54 ms $\to$ 185.04 ms** (**24.2%** of GPU time, **$9.36\times$ reduction**). Still **$36.3\times$ slower** than `stage-0-vllm`'s FlashAttention/FlashDecode (**5.10 ms**, **0.7%**).
+  * **Norm / Act / Other (incl. KV `torch.cat`):** **574.33 ms $\to$ 100.63 ms** (**13.2%** of GPU time).
+
+##### 2. Nsight Compute Layer 0 Roofline (`L = 2048` Prefill + `M = 1` Decode)
+*(Note: Stage 0 deferred NCU profiling because `nsys` timeline metrics already isolated full-sequence decode recomputation; `./benchmarks/profile_ncu.sh stage-1-custom` profiles Layer 0 directly against `stage-0-vllm`'s ceilings of `896.0 GB/s` DRAM and `40.0 TFLOP/s` Tensor Core compute.)*
+
+* **Prefill Linear GEMM:** **2,180.67 µs**, $\text{AI} = \mathbf{755.53\text{ FLOP/B}}$, **25.86 TFLOP/s** (**64.6%** of 40 TFLOP/s ceiling; **90.9%** NCU SM compute throughput) at **34.23 GB/s** (**3.8%** of 896 GB/s peak; **7.6%** NCU DRAM). Compute-bound, matching `stage-0-vllm` (`27.35 TFLOP/s`, `95.1%` SM).
+* **Prefill Attention (Unfused Materialized Matrix vs. FlashAttention):**
+  * Inside `attn_compute`, the dominant BMM kernel (`Q @ K^T` `cutlass_80_wmma...`) takes **1,209.38 µs** at $\text{AI} = \mathbf{135.42\text{ FLOP/B}}$ and **10.70 TFLOP/s** (**26.7%** of 40 TFLOP/s ceiling; **63.2%** NCU SM) with **78.98 GB/s** DRAM traffic (**17.4%** NCU DRAM)—and additionally launches a separate float32 `softmax_warp_forward` kernel (**1,012.48 µs** streaming HBM at **375.65 GB/s** / **82.9%** NCU DRAM) plus mask/cast passes over the materialized $[1, 12, 2048, 2048]$ matrix.
+  * By contrast, `stage-0-vllm`'s fused `Prefill Attention (FlashDecode/SplitKV)` keeps the score tiles in SRAM, finishing the entire attention op in **732.58 µs** at $\text{AI} = \mathbf{1,631.02\text{ FLOP/B}}$ and **18.84 TFLOP/s** while touching only **11.55 GB/s** of DRAM (**2.6%** NCU DRAM).
+* **Decode Linear GEMV:** **94.72 µs**, $\text{AI} = \mathbf{1.015\text{ FLOP/B}}$, **0.295 TFLOP/s** (**0.7%** of 40 TFLOP/s ceiling; **35.7%** NCU SM) at **291.10 GB/s** (**32.5%** of 896 GB/s physical peak; **64.3%** NCU sustained-clock DRAM utilization). Strictly memory-bandwidth bound, matching `stage-0-vllm` (`AI = 1.001 FLOP/B`, `0.321 TFLOP/s`, `321.10 GB/s`, `70.9%` NCU DRAM).
+* **Decode Attention & KV Cache Concatenation:**
+  * `Decode Attention` (`cublasGemvParamsEx` over expanded K/V) runs in **32.22 µs** at $\text{AI} = \mathbf{1.105\text{ FLOP/B}}$, **0.217 TFLOP/s**, and **196.19 GB/s** (**43.3%** NCU DRAM), whereas `stage-0-vllm`'s `FlashDecode/SplitKV` runs in **26.02 µs** at $\text{AI} = \mathbf{66.67\text{ FLOP/B}}$ and **5.53 TFLOP/s** without materializing `repeat_interleave` copies.
+  * `Decode KV Cache Write` (`CatArrayBatchedCopy` from `torch.cat((past_k, k), dim=2)`) takes **24.83 µs** at **42.46 GB/s** (**2.77× slower** than vLLM's in-place `reshape_and_cache_flash_kernel` at **8.96 µs**) because `torch.cat` reallocates and copies the entire growing KV history on every token.
+
+---
+
 #### 5. Conclusion
 
+1. **Hypothesis Confirmed:** Adding a per-layer KV cache eliminated $O(S^2)$ decode recomputation, cutting decode step time by **$5.12\times$** at $L=1024$ (**110.38 $\to$ 21.54 ms/step**) and TPOT by **$11.02\times$** at $L=2048$ (**265.51 $\to$ 24.09 ms/token**).
+2. **Bottleneck Shift Exposed by `nsys` and `ncu`:**
+   * **Prefill Memory Wall:** Unfused PyTorch attention materializes the $S \times S$ score matrix in HBM ($\text{AI} = 135.4\text{ FLOP/B}$ in BMM + $375.7\text{ GB/s}$ DRAM traffic in fp32 softmax), motivating **Stage 2 (Tiled / FlashAttention)**.
+   * **Eager Launch & Unfused Kernel Overhead:** With decode kernels now fast ($M=1$ GEMV at $1.015\text{ FLOP/B}$), launching ~1,329 tiny unfused kernels per token leaves the GPU idle **54.34%** of wall time and reallocates the KV cache via `torch.cat` on every step, motivating pre-allocated/paged KV storage and operator fusion in later stages.
+
+---
+
 #### 6. Data Sources and Reproducibility
+
+| Reported Metric | Source Artifact | Counter / Field |
+| :--- | :--- | :--- |
+| **Throughput, TTFT & TPOT** | `benchmarks/results/stage-1-custom/pareto_c*.json`, `context_l*.json` | `output_throughput`, `mean_ttft_ms`, `mean_tpot_ms` |
+| **Stage 0 Custom Baseline** | `benchmarks/results/stage-0-custom/pareto_c*.json`, `context_l*.json`, `nsys_metrics.json` | Baseline comparison metrics |
+| **vLLM Reference Baseline** | `benchmarks/results/stage-0-vllm/pareto_c*.json`, `context_l*.json`, `nsys_metrics.json`, `ncu_metrics.json` | Reference ceiling metrics |
+| **Timeline Breakdown** | `benchmarks/results/stage-1-custom/nsys_metrics.json` | `wall_time_ms`, `gpu_active_pct`, `decode_step_avg_ms`, `kernel_time_breakdown` |
+| **Kernel Roofline** | `benchmarks/results/stage-1-custom/ncu_metrics.json` | `execution_time_us`, `achieved_dram_gbps`, `attained_tflops`, `arithmetic_intensity_flop_byte` |
+| **Interactive Plots** | `benchmarks/results/dashboard.html` | Multi-stage comparative Plotly dashboard |
+
+---
+
+### Stage 2: Tiled Attention / FlashAttention (`stage-2-custom`)
+
+*Server directory: `custom-serving/stage-2-tiled-attn/` (Planned) | Benchmark stage: `stage-2-custom`*
+
+#### 1. Motivation
+
+##### Observation (Stage 1 KV Cache: `stage-1-custom` vs. `stage-0-vllm`)
+With redundant decode recomputation eliminated by the Stage 1 KV cache, Nsight Compute Layer 0 profiling ($L=2048$ prefill) exposes a **$12.0\times$ Arithmetic Intensity collapse** in unfused prefill attention compared to `stage-0-vllm`:
+* **`stage-0-vllm` (`Prefill Attention (FlashDecode/SplitKV)`):** Executes in **732.58 µs** at an Arithmetic Intensity of **1,631.02 FLOP/Byte**, attaining **18.84 TFLOP/s** (**47.1%** of the 40 TFLOP/s ceiling; **65.0%** NCU SM throughput) while drawing only **11.55 GB/s** of DRAM bandwidth (**2.55%** NCU DRAM) by keeping attention tiles resident in on-chip SRAM.
+* **`stage-1-custom` (Unfused PyTorch `attn_compute`):** Even the dominant score BMM (`Q @ K^T`, `cutlass_80_wmma...`) drops to **135.42 FLOP/Byte** ($12.0\times$ lower AI) and **10.70 TFLOP/s** over **1,209.38 µs** (`1.65x` slower than vLLM's entire fused attention kernel) while driving **78.98 GB/s** of DRAM traffic ($6.8\times$ higher HBM bandwidth)—and then spills the materialized $[1, 12, 2048, 2048]$ attention matrix across separate HBM-bound kernels for scaling (`453.98 µs` at **392.36 GB/s**), causal masking (`662.91 µs` at **205.50 GB/s**), fp32 upcast (`787.58 µs` at **359.65 GB/s**), and `softmax_warp_forward` (`1,012.48 µs` at **375.65 GB/s**, **82.91%** NCU DRAM).
+
+##### Hypothesis
+Fusing `Q @ K^T`, scaling, causal masking, online softmax, and `probs @ V` into a tiled SRAM kernel (FlashAttention-style) will avoid materializing the $O(S^2)$ intermediate score and probability matrices in GDDR7, restoring high arithmetic intensity during prefill and eliminating the HBM memory wall at long contexts.

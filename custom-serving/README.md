@@ -2,7 +2,7 @@
 
 From-scratch PyTorch/CUDA inference engines built **strictly additively**: each stage copies `stage-(N-1)` and implements one architectural upgrade on top of it.
 
-All stages serve `Qwen/Qwen2.5-Coder-1.5B-Instruct` (`bfloat16`) via an OpenAI-compatible `POST /v1/chat/completions` SSE endpoint on port `8000` (configured by root `config.yaml`) and emit `prefill_step` / `decode_step` NVTX ranges for `benchmarks/profile_nsys.sh`. Shared parity verification lives at `custom-serving/test_parity.py` (`--stage stage-0-baseline|stage-1-kv-cache|all`), loading each stage's `model.py` and `engine.py` in isolation to verify single-step prefill logits and 100% greedy token ID parity against HuggingFace `AutoModelForCausalLM` (`attn_implementation="eager"`).
+All stages serve `Qwen/Qwen2.5-Coder-1.5B-Instruct` (`bfloat16`) via an OpenAI-compatible `POST /v1/chat/completions` SSE endpoint on port `8000` (configured by root `config.yaml`), emit `prefill_step` / `decode_step` / `attn_compute` NVTX ranges for `benchmarks/profile_nsys.sh`, and support standalone Layer 0 kernel profiling via `benchmarks/profile_ncu.sh <stage-id>` (Stage 0 deferred NCU profiling since `nsys` timeline metrics already isolated full-sequence decode recomputation). Shared parity verification lives at `custom-serving/test_parity.py` (`--stage stage-0-baseline|stage-1-kv-cache|all`), loading each stage's `model.py` and `engine.py` in isolation to verify single-step prefill logits and 100% greedy token ID parity against HuggingFace `AutoModelForCausalLM` (`attn_implementation="eager"`).
 
 ---
 

@@ -2,7 +2,7 @@
 
 A shared guide for running the inference server, checking functionality, benchmarking workloads, profiling GPU behavior, and comparing optimization stages across both project tracks:
 * **Reference track (`vllm-reference/`):** vLLM reference implementations (`stage-0-baseline`, `stage-1-spec-dec`, `stage-2-prefix-cache`).
-* **Custom track (`custom-serving/`):** Progressive from-scratch implementations (starting from `stage-0-baseline`).
+* **Custom track (`custom-serving/`):** Progressive from-scratch implementations (`stage-0-baseline`, `stage-1-kv-cache`).
 
 > **Core Principle:** Keep experiments repeatable—change one variable at a time and record the environment and settings.
 
@@ -72,13 +72,16 @@ In **Terminal 1**:
 
 # Custom Track Stage 0: Naive PyTorch Baseline
 ./custom-serving/stage-0-baseline/serve.sh
+
+# Or Custom Track Stage 1: Naive KV Cache
+./custom-serving/stage-1-kv-cache/serve.sh
 ```
 
 Wait until the model has loaded and the server reports readiness. The reference API is available at `http://127.0.0.1:8000/v1`.
 
 For another implementation, start its documented server script. Keep the API interface and port consistent where practical so the same client and benchmark harness can be reused.
 
-> **Note on Stage Names:** Server directories are named by path (`vllm-reference/stage-0-baseline/`, `vllm-reference/stage-1-spec-dec/`, `vllm-reference/stage-2-prefix-cache/`, and `custom-serving/stage-0-baseline/`), while runner and benchmark scripts take stage identifiers (`stage-0-vllm`, `stage-1-vllm`, `stage-2-vllm`, and `stage-0-custom`), which directly name the result folders under `benchmarks/results/<stage-name>/`.
+> **Note on Stage Names:** Server directories are named by path (`vllm-reference/stage-0-baseline/`, `vllm-reference/stage-1-spec-dec/`, `vllm-reference/stage-2-prefix-cache/`, `custom-serving/stage-0-baseline/`, and `custom-serving/stage-1-kv-cache/`), while runner and benchmark scripts take stage identifiers (`stage-0-vllm`, `stage-1-vllm`, `stage-2-vllm`, `stage-0-custom`, and `stage-1-custom`), which directly name the result folders under `benchmarks/results/<stage-name>/`.
 
 ### Profiler-Ready Launch (Nsight Systems)
 
@@ -86,10 +89,11 @@ To capture serving activity without including model startup, launch the referenc
 
 ```bash
 NSYS=ON ./vllm-reference/stage-0-baseline/serve.sh
-# or for Stage 1 / Stage 2 / Custom Stage 0:
+# or for Stage 1 / Stage 2 / Custom Stages:
 NSYS=ON ./vllm-reference/stage-1-spec-dec/serve.sh
 NSYS=ON ./vllm-reference/stage-2-prefix-cache/serve.sh
 NSYS=ON ./custom-serving/stage-0-baseline/serve.sh
+NSYS=ON ./custom-serving/stage-1-kv-cache/serve.sh
 ```
 
 *Use this only if the implementation's launch script supports the `NSYS` option.*
@@ -160,6 +164,9 @@ In **Terminal 2**:
 
 # Benchmark Custom Stage 0
 ./benchmarks/bench_closed_loop.sh stage-0-custom
+
+# Benchmark Custom Stage 1
+./benchmarks/bench_closed_loop.sh stage-1-custom
 ```
 
 The standard closed-loop script runs two sweeps:
@@ -204,18 +211,20 @@ Nsight Systems captures the overall timeline: CPU activity, CUDA calls, GPU kern
 * **Terminal 1:** Start the server in profiler-ready mode:
   ```bash
   NSYS=ON ./vllm-reference/stage-0-baseline/serve.sh
-  # or for Stage 1 / Stage 2 / Custom Stage 0:
+  # or for Stage 1 / Stage 2 / Custom Stages:
   NSYS=ON ./vllm-reference/stage-1-spec-dec/serve.sh
   NSYS=ON ./vllm-reference/stage-2-prefix-cache/serve.sh
   NSYS=ON ./custom-serving/stage-0-baseline/serve.sh
+  NSYS=ON ./custom-serving/stage-1-kv-cache/serve.sh
   ```
 * **Terminal 2:** Run the profile:
   ```bash
   ./benchmarks/profile_nsys.sh stage-0-vllm
-  # or for Stage 1 / Stage 2 / Custom Stage 0:
+  # or for Stage 1 / Stage 2 / Custom Stages:
   ./benchmarks/profile_nsys.sh stage-1-vllm
   ./benchmarks/profile_nsys.sh stage-2-vllm
   ./benchmarks/profile_nsys.sh stage-0-custom
+  ./benchmarks/profile_nsys.sh stage-1-custom
   ```
 
 **Outputs:**
@@ -244,10 +253,12 @@ Nsight Compute examines selected kernels in more detail, including execution tim
   ./benchmarks/profile_ncu.sh stage-0-vllm
   ./benchmarks/profile_ncu.sh stage-1-vllm
   ./benchmarks/profile_ncu.sh stage-2-vllm
-  ```
-  *(Custom Stage 0 defers NCU profiling to Stage 1; subsequent stages under `custom-serving/` will provide their own NCU runner emitting the `ncu_metrics.json` schema—see `custom-serving/AGENTS.md`.)*
 
-For `stage-1-vllm` (or stages containing speculative decoding), the script automatically detects the draft model and profiles Target Layer 0 verification at batch size $M = K + 1$ (where $K$ is the number of drafted tokens) alongside Prefill. For standard stages, it profiles single-token decode ($M = 1$).
+  # Custom track (Stage 0 deferred NCU since nsys already isolated full-sequence decode recomputation)
+  ./benchmarks/profile_ncu.sh stage-1-custom
+  ```
+
+For `stage-1-vllm` (or stages containing speculative decoding), the script automatically detects the draft model and profiles Target Layer 0 verification at batch size $M = K + 1$ (where $K$ is the number of drafted tokens) alongside Prefill. For standard vLLM and `stage-*-custom` stages, it profiles Layer 0 Prefill ($L=2048$) and single-token Decode ($M = 1$).
 
 **Outputs:**
 - `kernels.ncu-rep` (in `benchmarks/profiles/<stage-name>/`) — Full trace for the Nsight Compute GUI.
@@ -282,7 +293,7 @@ uv run python benchmarks/plot_dashboard.py
 uv run python benchmarks/plot_dashboard.py --stages stage-0-vllm
 
 # Compare stages
-uv run python benchmarks/plot_dashboard.py --stages stage-0-vllm stage-1-vllm stage-2-vllm stage-0-custom -o comparison.html
+uv run python benchmarks/plot_dashboard.py --stages stage-0-vllm stage-1-vllm stage-2-vllm stage-0-custom stage-1-custom -o comparison.html
 ```
 
 Open the generated HTML file in a browser. By default, the dashboard is saved to `benchmarks/results/dashboard.html`; when using `-o`, check the path supplied to that option.

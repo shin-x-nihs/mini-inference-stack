@@ -1,10 +1,9 @@
 import argparse
-import glob
 import json
 import math
-import os
 import re
 from pathlib import Path
+
 import plotly.graph_objects as go
 
 # --- Red, White & Black Palette (SemiAnalysis-inspired) ---
@@ -14,18 +13,77 @@ GRID_COLOR = "#222222"
 TEXT_MAIN = "#ffffff"
 TEXT_MUTED = "#a0a0a0"
 
-STAGE_COLORS = [
-    "#ff2a2a",  # Crimson Red (Primary)
-    "#ffffff",  # Pure White (Secondary)
-    "#ff7b54",  # Coral Red
-    "#888888",  # Steel Grey
-    "#b30000",  # Deep Blood Red
+# --- Track-Aware Progressive Palettes (Dark Theme) ---
+# Custom Track: Warm Crimson -> Coral/Orange -> Amber -> Gold progression
+CUSTOM_TRACK_COLORS = [
+    "#ff2a2a",  # Stage 0: Pure Crimson Red
+    "#ff8c42",  # Stage 1: Vibrant Tangerine / Coral Orange
+    "#ffd166",  # Stage 2: Warm Amber Gold
+    "#f4a261",  # Stage 3: Sandy Gold
+    "#ff5d8f",  # Stage 4: Electric Rose
+    "#fff3b0",  # Stage 5: Pale Cream Gold
 ]
+
+# vLLM Reference Track: Cool Ice White -> Electric Sky Cyan -> Mint Teal -> Violet
+VLLM_TRACK_COLORS = [
+    "#e2e8f0",  # Stage 0: Crisp Ice White / Silver
+    "#38bdf8",  # Stage 1: Electric Sky Cyan
+    "#2dd4bf",  # Stage 2: Bright Mint Teal
+    "#a78bfa",  # Stage 3: Soft Lavender Violet
+    "#818cf8",  # Stage 4: Periwinkle Indigo
+]
+
+OTHER_TRACK_COLORS = [
+    "#c084fc",
+    "#f472b6",
+    "#4ade80",
+    "#facc15",
+]
+
+# Concentric marker radii by stage number so overlapping points form a clean bullseye
+STAGE_ROOFLINE_SIZES = [15, 10, 7, 5, 4, 4]
 
 
 def extract_int(filename: str) -> int:
     match = re.search(r"(\d+)", filename)
     return int(match.group(1)) if match else 0
+
+
+def parse_stage_meta(stage_name: str) -> tuple[str, int, int, str, str, int]:
+    """
+    Returns (track, track_order, stage_num, color, marker_symbol, marker_size)
+    from a stage name like 'stage-0-custom' or 'stage-2-vllm'.
+    """
+    low = stage_name.lower()
+    stage_num = extract_int(stage_name)
+    if "custom" in low:
+        track = "custom"
+        track_order = 0
+        color = CUSTOM_TRACK_COLORS[stage_num % len(CUSTOM_TRACK_COLORS)]
+        symbol = "circle"
+    elif "vllm" in low:
+        track = "vllm"
+        track_order = 1
+        color = VLLM_TRACK_COLORS[stage_num % len(VLLM_TRACK_COLORS)]
+        symbol = "diamond"
+    else:
+        track = "other"
+        track_order = 2
+        color = OTHER_TRACK_COLORS[stage_num % len(OTHER_TRACK_COLORS)]
+        symbol = "square"
+
+    size = (
+        STAGE_ROOFLINE_SIZES[stage_num]
+        if stage_num < len(STAGE_ROOFLINE_SIZES)
+        else STAGE_ROOFLINE_SIZES[-1]
+    )
+    return track, track_order, stage_num, color, symbol, size
+
+
+def stage_sort_key(stage_or_dir) -> tuple[int, int, str]:
+    name = stage_or_dir["name"] if isinstance(stage_or_dir, dict) else stage_or_dir.name
+    _, track_order, stage_num, _, _, _ = parse_stage_meta(name)
+    return (track_order, stage_num, name)
 
 
 def padded_range(values: list[float], pad: float = 1.15) -> list[float]:
@@ -74,8 +132,15 @@ def effective_tflops(k: dict) -> float:
 
 
 def load_stage_data(stage_dir: Path) -> dict:
+    track, track_order, stage_num, color, symbol, size = parse_stage_meta(stage_dir.name)
     data = {
         "name": stage_dir.name,
+        "track": track,
+        "track_order": track_order,
+        "stage_num": stage_num,
+        "color": color,
+        "symbol": symbol,
+        "marker_size": size,
         "pareto": [],
         "context": [],
         "nsys": None,
@@ -132,193 +197,202 @@ def load_stage_data(stage_dir: Path) -> dict:
     return data
 
 
-def base_layout(title: str, xaxis_title: str, yaxis_title: str) -> dict:
-    return dict(
-        title=dict(
-            text=title,
-            font=dict(size=17, color=TEXT_MAIN, family="Inter, sans-serif"),
-            x=0.01,
-            y=0.96,
-        ),
-        paper_bgcolor=BG_CARD,
-        plot_bgcolor=BG_CARD,
-        font=dict(color=TEXT_MUTED, family="Inter, monospace", size=12),
-        margin=dict(l=60, r=30, t=82, b=55),
-        height=435,
-        hovermode="closest",
-        legend=dict(
-            orientation="h",
-            yanchor="bottom",
-            y=1.02,
-            xanchor="left",
-            x=0.0,
-            bgcolor="rgba(0,0,0,0)",
-            font=dict(color=TEXT_MAIN, size=11),
-        ),
-        xaxis=dict(
-            title=dict(text=xaxis_title, font=dict(color=TEXT_MAIN)),
-            gridcolor=GRID_COLOR,
-            zerolinecolor=GRID_COLOR,
-            linecolor="#333333",
-        ),
-        yaxis=dict(
-            title=dict(text=yaxis_title, font=dict(color=TEXT_MAIN)),
-            gridcolor=GRID_COLOR,
-            zerolinecolor=GRID_COLOR,
-            linecolor="#333333",
-        ),
-    )
+def base_layout(xaxis_title: str, yaxis_title: str) -> dict:
+    return {
+        "paper_bgcolor": BG_CARD,
+        "plot_bgcolor": BG_CARD,
+        "font": {"color": TEXT_MUTED, "family": "Inter, monospace", "size": 12},
+        "margin": {"l": 60, "r": 28, "t": 42, "b": 50},
+        "height": 385,
+        "hovermode": "closest",
+        "legend": {
+            "orientation": "h",
+            "yanchor": "bottom",
+            "y": 1.03,
+            "xanchor": "left",
+            "x": 0.0,
+            "bgcolor": "rgba(0,0,0,0)",
+            "font": {"color": TEXT_MAIN, "size": 11.5},
+            "itemclick": "toggle",
+            "itemdoubleclick": "toggleothers",
+        },
+        "xaxis": {
+            "title": {"text": xaxis_title, "font": {"color": TEXT_MAIN}},
+            "gridcolor": GRID_COLOR,
+            "zerolinecolor": GRID_COLOR,
+            "linecolor": "#333333",
+        },
+        "yaxis": {
+            "title": {"text": yaxis_title, "font": {"color": TEXT_MAIN}},
+            "gridcolor": GRID_COLOR,
+            "zerolinecolor": GRID_COLOR,
+            "linecolor": "#333333",
+        },
+    }
 
 
-def dropdown_style() -> dict:
-    return dict(
-        type="dropdown",
-        direction="down",
-        x=1.0,
-        y=1.11,
-        xanchor="right",
-        yanchor="top",
-        bgcolor="#1a1a1a",
-        bordercolor="#ff2a2a",
-        borderwidth=1,
-        font=dict(color=TEXT_MAIN, size=11),
-    )
+def default_active_track(stages: list[dict]) -> str:
+    return "all"
 
 
-def build_plot1_pareto(stages: list[dict]) -> go.Figure:
+def build_plot1_pareto(stages: list[dict], active_track: str) -> tuple[go.Figure, str]:
     fig = go.Figure(layout=base_layout(
-        "Throughput vs. Latency (System Capacity)",
         "System Throughput (tokens/s)",
-        "ITL P99 (ms)"
+        "TPOT Mean (ms/token)"
     ))
 
     metrics = [
-        ("ITL P99 (ms)", "p99_itl"),
-        ("ITL P90 (ms)", "p90_itl"),
-        ("ITL P50 (ms)", "p50_itl"),
-        ("TPOT Mean (ms/token)", "mean_tpot"),
+        ("mean_tpot", "TPOT Mean (ms/token)"),
+        ("p99_itl", "ITL P99 (ms)"),
+        ("p90_itl", "ITL P90 (ms)"),
+        ("p50_itl", "ITL P50 (ms)"),
     ]
 
-    for idx, s in enumerate(stages):
-        color = STAGE_COLORS[idx % len(STAGE_COLORS)]
+    # Alternate text positions on dense Pareto curves so C=1..C=16 don't overlap
+    pos_cycle = ["top center", "bottom center", "top right", "bottom left", "top left"]
+
+    for s in stages:
+        color = s["color"]
         pts = s["pareto"]
+        is_vis = (active_track == "all") or (s["track"] == active_track)
+        text_positions = [pos_cycle[i % len(pos_cycle)] for i in range(len(pts))]
         fig.add_trace(go.Scatter(
             x=[p["throughput"] for p in pts],
-            y=[p["p99_itl"] for p in pts],
+            y=[p["mean_tpot"] for p in pts],
             text=[f"C={p['concurrency']}" for p in pts],
-            textposition="top center",
+            textposition=text_positions,
+            textfont={"size": 10, "color": color},
             mode="lines+markers+text",
             name=s["name"],
-            line=dict(color=color, width=2.5),
-            marker=dict(size=8, color=color, line=dict(width=1, color=BG_CARD)),
+            visible=True if is_vis else "legendonly",
+            meta={"track": s["track"], "stage": s["name"]},
+            line={"color": color, "width": 2.5},
+            marker={
+                "size": 8,
+                "color": color,
+                "symbol": s["symbol"],
+                "line": {"width": 1.2, "color": BG_CARD},
+            },
             hovertemplate="<b>%{fullData.name}</b> (%{text})<br>Throughput: %{x:.1f} tok/s<br>Latency: %{y:.2f} ms<extra></extra>",
         ))
 
-    all_x = [p["throughput"] for s in stages for p in s["pareto"]]
-    fig.update_xaxes(range=padded_range(all_x))
-    fig.update_yaxes(range=padded_range([p["p99_itl"] for s in stages for p in s["pareto"]]))
+    vis_stages = [s for s in stages if active_track == "all" or s["track"] == active_track] or stages
+    vis_x = [p["throughput"] for s in vis_stages for p in s["pareto"]]
+    vis_y = [p["mean_tpot"] for s in vis_stages for p in s["pareto"]]
+    fig.update_xaxes(range=padded_range(vis_x))
+    fig.update_yaxes(range=padded_range(vis_y))
 
-    buttons = []
-    for label, key in metrics:
-        y_arrays = [[p[key] for p in s["pareto"]] for s in stages]
-        flat_y = [val for arr in y_arrays for val in arr]
-        buttons.append(dict(
-            label=label,
-            method="update",
-            args=[
-                {"y": y_arrays},
-                {"yaxis.title.text": label, "yaxis.range": padded_range(flat_y)}
-            ],
-        ))
+    options_html = "".join(
+        f'<option value="{key}"{" selected" if idx == 0 else ""}>{label}</option>'
+        for idx, (key, label) in enumerate(metrics)
+    )
+    header_html = f"""
+    <div class="plot-header-bar">
+        <div class="plot-title">Throughput vs. Latency (System Capacity)</div>
+        <div class="filter-controls">
+            <select id="plot1-metric-select" class="dark-select" onchange="updatePlot1Metric()">
+                {options_html}
+            </select>
+        </div>
+    </div>
+    """
+    return fig, header_html
 
-    fig.update_layout(updatemenus=[{**dropdown_style(), "buttons": buttons}])
-    return fig
 
-
-def build_plot2_prefill(stages: list[dict]) -> go.Figure:
+def build_plot2_prefill(stages: list[dict], active_track: str) -> tuple[go.Figure, str]:
     fig = go.Figure(layout=base_layout(
-        "Prompt Size vs. Time to First Token",
         "Input Prompt Length (tokens)",
         "Time to First Token - TTFT (ms)"
     ))
 
-    for idx, s in enumerate(stages):
-        color = STAGE_COLORS[idx % len(STAGE_COLORS)]
+    for s in stages:
+        color = s["color"]
         pts = s["context"]
+        is_vis = (active_track == "all") or (s["track"] == active_track)
         fig.add_trace(go.Scatter(
             x=[p["length"] for p in pts],
             y=[p["ttft"] for p in pts],
             mode="lines+markers",
             name=s["name"],
-            line=dict(color=color, width=2.5),
-            marker=dict(size=8, color=color),
+            visible=True if is_vis else "legendonly",
+            meta={"track": s["track"], "stage": s["name"]},
+            line={"color": color, "width": 2.5},
+            marker={"size": 8, "color": color, "symbol": s["symbol"], "line": {"width": 1, "color": BG_CARD}},
             hovertemplate="<b>%{fullData.name}</b><br>Prompt: %{x} tok<br>TTFT: %{y:.2f} ms<extra></extra>",
         ))
 
-    all_x = [p["length"] for s in stages for p in s["context"]]
-    all_y = [p["ttft"] for s in stages for p in s["context"]]
-    if all_x:
-        fig.update_xaxes(range=[0, max(all_x) * 1.08])
-    fig.update_yaxes(range=padded_range(all_y))
-    return fig
+    vis_stages = [s for s in stages if active_track == "all" or s["track"] == active_track] or stages
+    vis_x = [p["length"] for s in vis_stages for p in s["context"]]
+    vis_y = [p["ttft"] for s in vis_stages for p in s["context"]]
+    if vis_x:
+        fig.update_xaxes(range=[0, max(vis_x) * 1.08])
+    fig.update_yaxes(range=padded_range(vis_y))
+
+    header_html = """
+    <div class="plot-header-bar">
+        <div class="plot-title">Prompt Size vs. Time to First Token</div>
+        <div class="filter-controls"></div>
+    </div>
+    """
+    return fig, header_html
 
 
-def build_plot3_decode(stages: list[dict]) -> go.Figure:
+def build_plot3_decode(stages: list[dict], active_track: str) -> tuple[go.Figure, str]:
     fig = go.Figure(layout=base_layout(
-        "Context Length vs. Generation Speed",
         "Context Sequence Length (tokens)",
         "TPOT (ms/token)"
     ))
 
     metrics = [
-        ("TPOT (ms/token)", "tpot"),
-        ("Generation Speed (tokens/s/req)", "gen_speed"),
+        ("tpot", "TPOT (ms/token)"),
+        ("gen_speed", "Generation Speed (tokens/s/req)"),
     ]
 
-    for idx, s in enumerate(stages):
-        color = STAGE_COLORS[idx % len(STAGE_COLORS)]
+    for s in stages:
+        color = s["color"]
         pts = s["context"]
+        is_vis = (active_track == "all") or (s["track"] == active_track)
         fig.add_trace(go.Scatter(
             x=[p["length"] for p in pts],
             y=[p["tpot"] for p in pts],
             mode="lines+markers",
             name=s["name"],
-            line=dict(color=color, width=2.5),
-            marker=dict(size=8, color=color),
+            visible=True if is_vis else "legendonly",
+            meta={"track": s["track"], "stage": s["name"]},
+            line={"color": color, "width": 2.5},
+            marker={"size": 8, "color": color, "symbol": s["symbol"], "line": {"width": 1, "color": BG_CARD}},
             hovertemplate="<b>%{fullData.name}</b><br>Context: %{x} tok<br>Value: %{y:.2f}<extra></extra>",
         ))
 
-    all_x = [p["length"] for s in stages for p in s["context"]]
-    if all_x:
-        fig.update_xaxes(range=[0, max(all_x) * 1.08])
-    fig.update_yaxes(range=padded_range([p["tpot"] for s in stages for p in s["context"]]))
+    vis_stages = [s for s in stages if active_track == "all" or s["track"] == active_track] or stages
+    vis_x = [p["length"] for s in vis_stages for p in s["context"]]
+    vis_y = [p["tpot"] for s in vis_stages for p in s["context"]]
+    if vis_x:
+        fig.update_xaxes(range=[0, max(vis_x) * 1.08])
+    fig.update_yaxes(range=padded_range(vis_y))
 
-    buttons = []
-    for label, key in metrics:
-        y_arrays = [[p[key] for p in s["context"]] for s in stages]
-        flat_y = [val for arr in y_arrays for val in arr]
-        buttons.append(dict(
-            label=label,
-            method="update",
-            args=[
-                {"y": y_arrays},
-                {"yaxis.title.text": label, "yaxis.range": padded_range(flat_y)}
-            ],
-        ))
+    options_html = "".join(
+        f'<option value="{key}"{" selected" if idx == 0 else ""}>{label}</option>'
+        for idx, (key, label) in enumerate(metrics)
+    )
+    header_html = f"""
+    <div class="plot-header-bar">
+        <div class="plot-title">Context Length vs. Generation Speed</div>
+        <div class="filter-controls">
+            <select id="plot3-metric-select" class="dark-select" onchange="updatePlot3Metric()">
+                {options_html}
+            </select>
+        </div>
+    </div>
+    """
+    return fig, header_html
 
-    fig.update_layout(updatemenus=[{**dropdown_style(), "buttons": buttons}])
-    return fig
 
-
-def build_plot4_roofline(stages: list[dict]) -> tuple[go.Figure, str, str]:
+def build_plot4_roofline(stages: list[dict], active_track: str) -> tuple[go.Figure, str, str]:
     layout = base_layout(
-        "",
         "Arithmetic Intensity (FLOP/Byte)",
         "Attained Performance (TFLOP/s)"
     )
-    layout["margin"] = dict(l=60, r=30, t=36, b=50)
-    layout["height"] = 365
-    layout["legend"]["y"] = 1.03
 
     fig = go.Figure(layout=layout)
 
@@ -341,8 +415,9 @@ def build_plot4_roofline(stages: list[dict]) -> tuple[go.Figure, str, str]:
         x=ceil_x,
         y=ceil_y,
         mode="lines",
-        name=f"Hardware Ceiling ({peak_bw_gbps:.0f} GB/s | {peak_compute_tflops:.0f} TFLOP/s)",
-        line=dict(color="#ff2a2a", width=2, dash="dash"),
+        name=f"Ceiling ({peak_bw_gbps:.0f} GB/s | {peak_compute_tflops:.0f} TFLOP/s)",
+        meta={"track": "ceiling", "stage": "ceiling"},
+        line={"color": "#ff2a2a", "width": 2, "dash": "dash"},
         hoverinfo="skip",
     ))
 
@@ -351,12 +426,11 @@ def build_plot4_roofline(stages: list[dict]) -> tuple[go.Figure, str, str]:
     group_orders = {}
     js_stage_kernels = []
 
-    # Concentric marker radii so overlapping stages form a visible bullseye (outer ring + inner center)
-    concentric_sizes = [14, 8, 5, 4]
-
-    for idx, s in enumerate(ncu_stages):
-        color = STAGE_COLORS[idx % len(STAGE_COLORS)]
-        marker_size = concentric_sizes[idx] if idx < len(concentric_sizes) else 4
+    for s in ncu_stages:
+        color = s["color"]
+        marker_size = s["marker_size"]
+        track_symbol = s["symbol"]
+        is_vis = (active_track == "all") or (s["track"] == active_track)
 
         valid_k = [
             k for k in s["ncu"].get("kernels", [])
@@ -373,17 +447,23 @@ def build_plot4_roofline(stages: list[dict]) -> tuple[go.Figure, str, str]:
                 "x": k["arithmetic_intensity_flop_byte"],
                 "y": tflops_val,
                 "label": k["label"],
+                "short_label": k.get("short_label", k["label"]),
                 "phase": k.get("phase", ""),
                 "phase_lower": k.get("phase", "").lower(),
                 "group": g,
                 "is_core": bool(k.get("is_core")),
                 "exec_us": k.get("execution_time_us", 0.0),
                 "dram_gbps": k.get("achieved_dram_gbps", 0.0),
-                "symbol": "diamond" if k.get("phase") == "Prefill" else "circle",
+                "symbol": track_symbol,
             })
 
         js_stage_kernels.append({
             "stage": s["name"],
+            "track": s["track"],
+            "stage_num": s["stage_num"],
+            "color": color,
+            "symbol": track_symbol,
+            "size": marker_size,
             "kernels": stage_k_list,
         })
 
@@ -392,21 +472,23 @@ def build_plot4_roofline(stages: list[dict]) -> tuple[go.Figure, str, str]:
         fig.add_trace(go.Scatter(
             x=[k["x"] for k in core_ks],
             y=[k["y"] for k in core_ks],
-            text=[k["label"] for k in core_ks],
-            customdata=[[k["phase"], k["exec_us"], k["dram_gbps"], k["label"], s["name"]] for k in core_ks],
+            text=[k["short_label"] for k in core_ks],
+            customdata=[[k["phase"], k["exec_us"], k["dram_gbps"], k["label"], s["name"], s["track"].upper()] for k in core_ks],
             mode="markers+text",
             textposition="top center",
-            textfont=dict(size=10, color=TEXT_MUTED),
+            textfont={"size": 10, "color": TEXT_MUTED},
             name=s["name"],
-            marker=dict(
-                size=marker_size,
-                color=color,
-                symbol=[k["symbol"] for k in core_ks],
-                line=dict(width=1.2, color="#000000"),
-            ),
+            visible=True if is_vis else "legendonly",
+            meta={"track": s["track"], "stage": s["name"]},
+            marker={
+                "size": marker_size,
+                "color": color,
+                "symbol": track_symbol,
+                "line": {"width": 1.3, "color": "#000000"},
+            },
             hovertemplate=(
                 "<b>%{customdata[3]}</b><br>"
-                "Stage: <b>%{customdata[4]}</b> (%{customdata[0]})<br>"
+                "Stage: <b>%{customdata[4]}</b> [%{customdata[5]} | %{customdata[0]}]<br>"
                 "AI: %{x:.2f} FLOP/B<br>"
                 "Perf: %{y:.4f} TFLOP/s<br>"
                 "DRAM: %{customdata[2]:.1f} GB/s<br>"
@@ -434,16 +516,24 @@ def build_plot4_roofline(stages: list[dict]) -> tuple[go.Figure, str, str]:
         + "".join(f'<option value="{g}">Kernel: {g}</option>' for g in ordered_groups)
     )
     stage_options_html = (
-        '<option value="all" selected>All Stages</option>'
-        + "".join(f'<option value="{s["name"]}">{s["name"]}</option>' for s in ncu_stages)
+        '<option value="all" selected>All Track Stages</option>'
+        + "".join(
+            f'<option value="{s["name"]}" data-track="{s["track"]}">{s["name"]}</option>'
+            for s in ncu_stages
+        )
     )
 
     controls_html = f"""
-    <div class="plot4-header-bar">
-        <div class="plot4-title">Hardware Roofline (Compute vs. Memory)</div>
+    <div class="plot-header-bar">
+        <div class="plot-title">
+            Hardware Roofline
+            <span class="roofline-key" title="Shape = Track | Size = Stage Index">
+                (● Custom &nbsp;◆ vLLM &nbsp;|&nbsp; Size: S0 &gt; S1 &gt; S2)
+            </span>
+        </div>
         <div class="filter-controls">
             <div class="pill-group" id="roofline-phase-pills">
-                <button class="pill active" data-phase="all" onclick="setRooflinePhase('all')">All Phases</button>
+                <button class="pill active" data-phase="all" onclick="setRooflinePhase('all')">All</button>
                 <button class="pill" data-phase="prefill" onclick="setRooflinePhase('prefill')">Prefill</button>
                 <button class="pill" data-phase="decode" onclick="setRooflinePhase('decode')">Decode</button>
             </div>
@@ -461,12 +551,17 @@ def build_plot4_roofline(stages: list[dict]) -> tuple[go.Figure, str, str]:
 
 
 def build_tables_html(stages: list[dict]) -> str:
+    # Stages are already sorted by (track_order, stage_num, name)
     # Table A: Nsight Systems Timeline Overview
     nsys_rows = ""
+    prev_track = None
     for s in stages:
         n = s["nsys"]
         if not n:
             continue
+
+        track_divider = "group-start" if (prev_track is not None and s["track"] != prev_track) else ""
+        prev_track = s["track"]
 
         wall_ms = n.get("wall_time_ms", 0.0)
         num_k = n.get("num_kernels")
@@ -497,7 +592,7 @@ def build_tables_html(stages: list[dict]) -> str:
 
         dec_step = n.get("decode_step_avg_ms", 0.0)
         dec_tot = n.get("decode_total_ms")
-        dec_sub = f' <span class="sub">({dec_tot:.1f} ms tot.)</span>' if dec_tot is not None else ""
+        dec_sub = f' <span class="sub">({dec_tot:.1f} ms)</span>' if dec_tot is not None else ""
 
         kb = n.get("kernel_time_breakdown")
         if kb:
@@ -507,16 +602,20 @@ def build_tables_html(stages: list[dict]) -> str:
             lin_m = kb.get("linear_ms", 0.0)
             att_m = kb.get("attention_ms", 0.0)
             oth_m = kb.get("norm_act_other_ms", 0.0)
+            if s["track"] == "custom":
+                ms_str = f"({int(lin_m)} / {int(att_m)} / {int(oth_m)} ms)"
+            else:
+                ms_str = f"({lin_m:.1f} / {att_m:.1f} / {oth_m:.1f} ms)"
             kb_cell = (
                 f"{lin_p:.1f}% / {att_p:.1f}% / {oth_p:.1f}% "
-                f'<span class="sub">({lin_m:.1f} / {att_m:.1f} / {oth_m:.1f} ms)</span>'
+                f'<span class="sub">{ms_str}</span>'
             )
         else:
             kb_cell = "-"
 
         nsys_rows += f"""
-        <tr>
-            <td class="stage-cell">{s['name']}</td>
+        <tr class="{track_divider}">
+            <td class="stage-cell"><span class="stage-dot" style="background:{s['color']};"></span>{s['name']}</td>
             <td>{wall_ms:.2f}{wall_sub}</td>
             <td><span class="highlight-red">{act_pct:.1f}%</span>{act_sub}</td>
             <td>{idle_pct:.1f}%{idle_sub}</td>
@@ -527,7 +626,7 @@ def build_tables_html(stages: list[dict]) -> str:
             <td>{kb_cell}</td>
         </tr>"""
 
-    # Table B: Nsight Compute Kernel Details (Grouped by Kernel for direct cross-stage comparison)
+    # Table B: Nsight Compute Kernel Details (Grouped by Kernel, then Track, then Stage)
     flat_entries = []
     group_orders = {}
 
@@ -555,6 +654,9 @@ def build_tables_html(stages: list[dict]) -> str:
             flat_entries.append({
                 "stage": s["name"],
                 "stage_idx": s_idx,
+                "track_order": s["track_order"],
+                "stage_num": s["stage_num"],
+                "color": s["color"],
                 "group": group,
                 "order": order,
                 "is_core": "true" if k.get("is_core") else "false",
@@ -572,8 +674,8 @@ def build_tables_html(stages: list[dict]) -> str:
                 "spills": k.get("local_spills_bytes", 0),
             })
 
-    # Sort by Canonical Kernel first, Stage second
-    flat_entries.sort(key=lambda x: (x["order"], x["group"], x["stage_idx"]))
+    # Sort by Canonical Kernel first, then Track (custom -> vllm), then Stage number
+    flat_entries.sort(key=lambda x: (x["order"], x["group"], x["track_order"], x["stage_num"], x["stage_idx"]))
 
     ncu_rows = ""
     prev_group = None
@@ -581,7 +683,7 @@ def build_tables_html(stages: list[dict]) -> str:
         group_divider = "group-start" if (prev_group is not None and item["group"] != prev_group) else ""
         prev_group = item["group"]
         phase_badge = f"<span class='badge badge-{item['phase']}'>{item['phase_label']}</span>"
-        stage_dot = STAGE_COLORS[item["stage_idx"] % len(STAGE_COLORS)]
+        stage_dot = item["color"]
 
         ncu_rows += f"""
         <tr class="ncu-row {group_divider}"
@@ -672,23 +774,42 @@ def build_tables_html(stages: list[dict]) -> str:
 
 
 def generate_dashboard(stages: list[dict], output_path: Path):
-    f1 = build_plot1_pareto(stages)
-    f2 = build_plot2_prefill(stages)
-    f3 = build_plot3_decode(stages)
-    f4, p4_controls_html, roofline_json = build_plot4_roofline(stages)
+    stages = sorted(stages, key=stage_sort_key)
+    active_track = default_active_track(stages)
+
+    f1, p1_header_html = build_plot1_pareto(stages, active_track)
+    f2, p2_header_html = build_plot2_prefill(stages, active_track)
+    f3, p3_header_html = build_plot3_decode(stages, active_track)
+    f4, p4_controls_html, roofline_json = build_plot4_roofline(stages, active_track)
 
     cfg = {
         "responsive": True,
         "displaylogo": False,
         "modeBarButtonsToRemove": ["select2d", "lasso2d"],
     }
-    p1_html = f1.to_html(full_html=False, include_plotlyjs=False, config=cfg)
-    p2_html = f2.to_html(full_html=False, include_plotlyjs=False, config=cfg)
-    p3_html = f3.to_html(full_html=False, include_plotlyjs=False, config=cfg)
+    p1_html = f1.to_html(full_html=False, include_plotlyjs=False, config=cfg, div_id="plot1-pareto")
+    p2_html = f2.to_html(full_html=False, include_plotlyjs=False, config=cfg, div_id="plot2-prefill")
+    p3_html = f3.to_html(full_html=False, include_plotlyjs=False, config=cfg, div_id="plot3-decode")
     p4_html = f4.to_html(full_html=False, include_plotlyjs=False, config=cfg, div_id="roofline-plot")
     tables_html = build_tables_html(stages)
 
-    stage_list = ", ".join(s["name"] for s in stages)
+    stage_badges_html = " ".join(
+        f'<span class="stage-pill-tag"><span class="stage-dot" style="background:{s["color"]};"></span>{s["name"]}</span>'
+        for s in stages
+    )
+
+    stages_client_json = json.dumps([
+        {
+            "name": s["name"],
+            "track": s["track"],
+            "stage_num": s["stage_num"],
+            "color": s["color"],
+            "symbol": s["symbol"],
+            "pareto": s["pareto"],
+            "context": s["context"],
+        }
+        for s in stages
+    ])
 
     html = f"""<!DOCTYPE html>
 <html lang="en">
@@ -702,15 +823,22 @@ def generate_dashboard(stages: list[dict], output_path: Path):
             background-color: {BG_PAGE};
             color: {TEXT_MAIN};
             font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            padding: 28px 36px;
+            padding: 26px 34px;
         }}
         header {{
             display: flex;
             justify-content: space-between;
-            align-items: baseline;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 16px;
             border-bottom: 2px solid #ff2a2a;
-            padding-bottom: 14px;
-            margin-bottom: 24px;
+            padding-bottom: 16px;
+            margin-bottom: 22px;
+        }}
+        .header-left {{
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
         }}
         header h1 {{
             font-size: 22px;
@@ -718,11 +846,74 @@ def generate_dashboard(stages: list[dict], output_path: Path):
             letter-spacing: -0.02em;
         }}
         header .meta {{
-            font-family: monospace;
-            font-size: 13px;
+            font-family: "JetBrains Mono", Consolas, monospace;
+            font-size: 12px;
             color: {TEXT_MUTED};
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 6px;
         }}
-        header .meta span {{ color: #ff2a2a; font-weight: 600; }}
+        .stage-pill-tag {{
+            display: inline-flex;
+            align-items: center;
+            background: #161616;
+            border: 1px solid #2a2a2a;
+            border-radius: 4px;
+            padding: 2px 8px;
+            color: #e5e5e5;
+            font-size: 11.5px;
+            font-weight: 600;
+        }}
+        .global-track-bar {{
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            background: #141414;
+            border: 1px solid #333333;
+            border-left: 3px solid #ff2a2a;
+            border-radius: 6px;
+            padding: 8px 14px;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.55);
+        }}
+        .track-bar-label {{
+            font-size: 11.5px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: #cccccc;
+            white-space: nowrap;
+        }}
+        .track-pill-group {{
+            display: inline-flex;
+            background: #0b0b0b;
+            border: 1px solid #383838;
+            border-radius: 5px;
+            overflow: hidden;
+        }}
+        .track-pill {{
+            background: transparent;
+            color: #a8a8a8;
+            border: none;
+            padding: 8px 16px;
+            font-family: Inter, sans-serif;
+            font-size: 12.5px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.14s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 7px;
+        }}
+        .track-pill:hover {{
+            background: #222222;
+            color: #ffffff;
+        }}
+        .track-pill.active {{
+            background: #ff2a2a;
+            color: #000000;
+            box-shadow: inset 0 0 8px rgba(0, 0, 0, 0.25);
+        }}
         .grid-2x2 {{
             display: grid;
             grid-template-columns: repeat(2, 1fr);
@@ -734,48 +925,56 @@ def generate_dashboard(stages: list[dict], output_path: Path):
             border: 1px solid #242424;
             border-top: 2px solid #ff2a2a;
             border-radius: 4px;
-            padding: 12px;
+            padding: 12px 14px;
         }}
-        .plot4-header-bar {{
+        .plot-header-bar {{
             display: flex;
             justify-content: space-between;
             align-items: center;
             flex-wrap: wrap;
             gap: 8px;
-            padding: 6px 6px 10px 6px;
+            padding: 4px 4px 10px 4px;
+            border-bottom: 1px solid #1e1e1e;
+            margin-bottom: 4px;
+            min-height: 40px;
         }}
-        .plot4-title {{
-            font-size: 17px;
+        .plot-title {{
+            font-size: 16px;
+            font-weight: 600;
             color: {TEXT_MAIN};
             font-family: Inter, sans-serif;
+            display: flex;
+            align-items: baseline;
+            flex-wrap: wrap;
+            gap: 8px;
+        }}
+        .roofline-key {{
+            font-size: 11px;
+            font-family: "JetBrains Mono", Consolas, monospace;
+            font-weight: 500;
+            color: #999999;
         }}
 
-        /* --- Plotly Dropdown dark-grey hover & active state --- */
-        .js-plotly-plot .plotly .updatemenu-item-rect {{
-            fill: #1a1a1a !important;
-            stroke: #333333 !important;
-            transition: fill 0.12s ease;
+        /* --- Interactive Clickable Legend Hover Enlargement --- */
+        .js-plotly-plot .plotly .legend .traces {{
+            cursor: pointer !important;
         }}
-        .js-plotly-plot .plotly .updatemenu-header-group .updatemenu-item-rect {{
-            stroke: #ff2a2a !important;
+        .js-plotly-plot .plotly .legend .traces .legendtext {{
+            transition: font-size 0.12s ease, fill 0.12s ease, font-weight 0.12s ease;
         }}
-        .js-plotly-plot .plotly .updatemenu-button:hover .updatemenu-item-rect,
-        .js-plotly-plot .plotly .updatemenu-dropdown-button:hover .updatemenu-item-rect,
-        .js-plotly-plot .plotly .updatemenu-item-rect:hover {{
-            fill: #2e2e2e !important;
-            stroke: #ff2a2a !important;
-        }}
-        .js-plotly-plot .plotly .updatemenu-item-text {{
+        .js-plotly-plot .plotly .legend .traces:hover .legendtext {{
+            font-size: 14px !important;
+            font-weight: 700 !important;
             fill: #ffffff !important;
         }}
-        .js-plotly-plot .plotly .updatemenu-header-arrow {{
-            fill: #ff2a2a !important;
+        .js-plotly-plot .plotly .legend .traces:hover .legendtoggle {{
+            cursor: pointer !important;
         }}
 
-        /* --- Pin modebar cleanly at top-right above dropdown --- */
+        /* --- Pin modebar cleanly at top-right --- */
         .js-plotly-plot .plotly .modebar {{
             top: 2px !important;
-            right: 6px !important;
+            right: 4px !important;
             background: rgba(18, 18, 18, 0.9) !important;
             border-radius: 4px;
             padding: 2px 4px;
@@ -797,6 +996,7 @@ def generate_dashboard(stages: list[dict], output_path: Path):
             font-size: 16px;
             color: {TEXT_MAIN};
             letter-spacing: -0.01em;
+            margin-bottom: 12px;
         }}
         .table-header-bar {{
             display: flex;
@@ -806,10 +1006,13 @@ def generate_dashboard(stages: list[dict], output_path: Path):
             gap: 12px;
             margin-bottom: 14px;
         }}
+        .table-header-bar h2 {{
+            margin-bottom: 0;
+        }}
         .filter-controls {{
             display: flex;
             align-items: center;
-            gap: 10px;
+            gap: 8px;
             flex-wrap: wrap;
         }}
         .pill-group {{
@@ -823,7 +1026,7 @@ def generate_dashboard(stages: list[dict], output_path: Path):
             background: transparent;
             color: {TEXT_MUTED};
             border: none;
-            padding: 6px 12px;
+            padding: 5px 11px;
             font-family: Inter, sans-serif;
             font-size: 11.5px;
             font-weight: 600;
@@ -877,14 +1080,14 @@ def generate_dashboard(stages: list[dict], output_path: Path):
             background-color: #171717;
         }}
         tr:hover td {{ background-color: #191919; }}
-        tr.group-start td {{ border-top: 2px solid #2e2e2e; }}
+        tr.group-start td {{ border-top: 2px solid #333333; }}
         .stage-cell {{ font-weight: 700; color: #ffffff; }}
         .stage-dot {{
             display: inline-block;
             width: 8px;
             height: 8px;
             border-radius: 50%;
-            margin-right: 8px;
+            margin-right: 7px;
             vertical-align: middle;
         }}
         .highlight-red {{ color: #ff2a2a; font-weight: 700; }}
@@ -906,23 +1109,168 @@ def generate_dashboard(stages: list[dict], output_path: Path):
 </head>
 <body>
     <header>
-        <h1>LLM INFERENCE & KERNEL BENCHMARK</h1>
-        <div class="meta">Active Stages: <span>{stage_list}</span></div>
+        <div class="header-left">
+            <h1>LLM INFERENCE &amp; KERNEL BENCHMARK</h1>
+            <div class="meta">Stages (Track-Ordered): {stage_badges_html}</div>
+        </div>
+        <div class="global-track-bar">
+            <span class="track-bar-label">Plots Track View:</span>
+            <div class="track-pill-group" id="global-track-pills">
+                <button class="track-pill{' active' if active_track == 'custom' else ''}" data-track="custom" onclick="setGlobalTrack('custom')">● Custom Track</button>
+                <button class="track-pill{' active' if active_track == 'vllm' else ''}" data-track="vllm" onclick="setGlobalTrack('vllm')">◆ vLLM Reference</button>
+                <button class="track-pill{' active' if active_track == 'all' else ''}" data-track="all" onclick="setGlobalTrack('all')">●◆ Both Tracks</button>
+            </div>
+        </div>
     </header>
 
     <div class="grid-2x2">
-        <div class="card">{p1_html}</div>
-        <div class="card">{p2_html}</div>
-        <div class="card">{p3_html}</div>
+        <div class="card">{p1_header_html}{p1_html}</div>
+        <div class="card">{p2_header_html}{p2_html}</div>
+        <div class="card">{p3_header_html}{p3_html}</div>
         <div class="card">{p4_controls_html}{p4_html}</div>
     </div>
 
     {tables_html}
 
     <script>
+        const STAGES_CLIENT_DATA = {stages_client_json};
         const ROOFLINE_STAGE_DATA = {roofline_json};
+        let currentGlobalTrack = '{active_track}';
         let currentRooflinePhase = 'all';
         let currentNcuPhase = 'all';
+
+        const PLOT1_LABELS = {{
+            'p99_itl': 'ITL P99 (ms)',
+            'p90_itl': 'ITL P90 (ms)',
+            'p50_itl': 'ITL P50 (ms)',
+            'mean_tpot': 'TPOT Mean (ms/token)'
+        }};
+
+        const PLOT3_LABELS = {{
+            'tpot': 'TPOT (ms/token)',
+            'gen_speed': 'Generation Speed (tokens/s/req)'
+        }};
+
+        function paddedMax(vals, pad = 1.15) {{
+            const valid = vals.filter(v => typeof v === 'number' && !isNaN(v) && v > 0);
+            if (!valid.length) return [0, 1];
+            return [0, Math.max(...valid) * pad];
+        }}
+
+        function getActiveTracesData(plotDiv) {{
+            if (!plotDiv || !plotDiv.data) return [];
+            return plotDiv.data.filter(t => t.visible === true || t.visible === undefined);
+        }}
+
+        function rescalePlot1Axes() {{
+            const plotDiv = document.getElementById('plot1-pareto');
+            if (!plotDiv || !plotDiv.data) return;
+            const active = getActiveTracesData(plotDiv);
+            const xs = [];
+            const ys = [];
+            active.forEach(t => {{
+                (t.x || []).forEach(v => xs.push(v));
+                (t.y || []).forEach(v => ys.push(v));
+            }});
+            const metricKey = document.getElementById('plot1-metric-select').value;
+            Plotly.relayout(plotDiv, {{
+                'xaxis.range': paddedMax(xs, 1.15),
+                'yaxis.range': paddedMax(ys, 1.15),
+                'yaxis.title.text': PLOT1_LABELS[metricKey] || 'Latency (ms)'
+            }});
+        }}
+
+        function rescalePlot2Axes() {{
+            const plotDiv = document.getElementById('plot2-prefill');
+            if (!plotDiv || !plotDiv.data) return;
+            const active = getActiveTracesData(plotDiv);
+            const xs = [];
+            const ys = [];
+            active.forEach(t => {{
+                (t.x || []).forEach(v => xs.push(v));
+                (t.y || []).forEach(v => ys.push(v));
+            }});
+            Plotly.relayout(plotDiv, {{
+                'xaxis.range': paddedMax(xs, 1.08),
+                'yaxis.range': paddedMax(ys, 1.15)
+            }});
+        }}
+
+        function rescalePlot3Axes() {{
+            const plotDiv = document.getElementById('plot3-decode');
+            if (!plotDiv || !plotDiv.data) return;
+            const active = getActiveTracesData(plotDiv);
+            const xs = [];
+            const ys = [];
+            active.forEach(t => {{
+                (t.x || []).forEach(v => xs.push(v));
+                (t.y || []).forEach(v => ys.push(v));
+            }});
+            const metricKey = document.getElementById('plot3-metric-select').value;
+            Plotly.relayout(plotDiv, {{
+                'xaxis.range': paddedMax(xs, 1.08),
+                'yaxis.range': paddedMax(ys, 1.15),
+                'yaxis.title.text': PLOT3_LABELS[metricKey] || 'TPOT (ms/token)'
+            }});
+        }}
+
+        function updatePlot1Metric() {{
+            const plotDiv = document.getElementById('plot1-pareto');
+            if (!plotDiv) return;
+            const key = document.getElementById('plot1-metric-select').value;
+            const yArrays = STAGES_CLIENT_DATA.map(s => s.pareto.map(p => p[key]));
+            Plotly.restyle(plotDiv, {{ y: yArrays }}).then(() => rescalePlot1Axes());
+        }}
+
+        function updatePlot3Metric() {{
+            const plotDiv = document.getElementById('plot3-decode');
+            if (!plotDiv) return;
+            const key = document.getElementById('plot3-metric-select').value;
+            const yArrays = STAGES_CLIENT_DATA.map(s => s.context.map(p => p[key]));
+            Plotly.restyle(plotDiv, {{ y: yArrays }}).then(() => rescalePlot3Axes());
+        }}
+
+        function setGlobalTrack(track) {{
+            currentGlobalTrack = track;
+            document.querySelectorAll('#global-track-pills .track-pill').forEach(btn => {{
+                btn.classList.toggle('active', btn.getAttribute('data-track') === track);
+            }});
+
+            const visFlags = STAGES_CLIENT_DATA.map(s =>
+                (track === 'all' || s.track === track) ? true : 'legendonly'
+            );
+
+            ['plot1-pareto', 'plot2-prefill', 'plot3-decode'].forEach(id => {{
+                const div = document.getElementById(id);
+                if (div) Plotly.restyle(div, {{ visible: visFlags }});
+            }});
+
+            rescalePlot1Axes();
+            rescalePlot2Axes();
+            rescalePlot3Axes();
+
+            // Sync Plot 4 Roofline stage dropdown options & trace visibility
+            const stageSelect = document.getElementById('roofline-stage-select');
+            if (stageSelect) {{
+                stageSelect.value = 'all';
+                Array.from(stageSelect.options).forEach(opt => {{
+                    const optTrack = opt.getAttribute('data-track');
+                    if (!optTrack) return;
+                    opt.style.display = (track === 'all' || optTrack === track) ? '' : 'none';
+                }});
+            }}
+
+            const roofDiv = document.getElementById('roofline-plot');
+            if (roofDiv && ROOFLINE_STAGE_DATA.length) {{
+                const roofVis = ROOFLINE_STAGE_DATA.map(sObj =>
+                    (track === 'all' || sObj.track === track) ? true : 'legendonly'
+                );
+                const traceIndices = ROOFLINE_STAGE_DATA.map((_, idx) => idx + 1);
+                Plotly.restyle(roofDiv, {{ visible: roofVis }}, traceIndices).then(() => {{
+                    filterRooflinePlot();
+                }});
+            }}
+        }}
 
         function setRooflinePhase(phase) {{
             currentRooflinePhase = phase;
@@ -939,10 +1287,15 @@ def generate_dashboard(stages: list[dict], output_path: Path):
             const kernelMode = document.getElementById('roofline-kernel-select').value;
             const stageMode = document.getElementById('roofline-stage-select').value;
 
-            // Step 1: Filter visible kernels per stage
-            const filteredByStage = ROOFLINE_STAGE_DATA.map(sObj => {{
+            // Step 1: Filter kernels per stage, respecting current trace visibility and dropdown filters
+            const filteredByStage = ROOFLINE_STAGE_DATA.map((sObj, sIdx) => {{
+                const traceObj = plotDiv.data ? plotDiv.data[sIdx + 1] : null;
+                const isTraceVisible = !traceObj || traceObj.visible === true || traceObj.visible === undefined;
+                if (!isTraceVisible) return [];
+
                 const matchStage = (stageMode === 'all') || (sObj.stage === stageMode);
                 if (!matchStage) return [];
+
                 return sObj.kernels.filter(k => {{
                     const matchPhase = (currentRooflinePhase === 'all') || (k.phase_lower === currentRooflinePhase);
                     let matchKernel = true;
@@ -955,9 +1308,9 @@ def generate_dashboard(stages: list[dict], output_path: Path):
                 }});
             }});
 
-            // Step 2: Detect overlapping points across stages in log-space
+            // Step 2: Detect overlapping points across visible stages in log-space
             // so we don't double-stamp text and can append "(×N)" on the top trace
-            const eps = 0.03; // ~7% log10 proximity threshold
+            const eps = 0.035; // ~8% log10 proximity threshold
             const clusters = [];
             filteredByStage.forEach((ks, sIdx) => {{
                 ks.forEach((k, kIdx) => {{
@@ -968,24 +1321,39 @@ def generate_dashboard(stages: list[dict], output_path: Path):
                         found = {{ lx, ly, members: [] }};
                         clusters.push(found);
                     }}
-                    found.members.push({{ sIdx, kIdx, stage: ROOFLINE_STAGE_DATA[sIdx].stage, label: k.label }});
+                    found.members.push({{
+                        sIdx,
+                        kIdx,
+                        stage: ROOFLINE_STAGE_DATA[sIdx].stage,
+                        short_label: k.short_label || k.label
+                    }});
                 }});
+            }});
+
+            // Alternate text positions across distinct clusters to prevent nearby labels from colliding
+            const posCycle = ['top center', 'bottom center', 'top right', 'bottom left', 'top left'];
+            clusters.sort((a, b) => a.lx - b.lx || a.ly - b.ly);
+            clusters.forEach((c, cIdx) => {{
+                c.textPos = posCycle[cIdx % posCycle.length];
             }});
 
             const xs = [];
             const ys = [];
             const texts = [];
+            const textPositions = [];
             const cdatas = [];
             const symbols = [];
             const traceIndices = [];
 
             filteredByStage.forEach((ks, sIdx) => {{
+                const sObj = ROOFLINE_STAGE_DATA[sIdx];
                 traceIndices.push(sIdx + 1); // Trace 0 is the fixed Hardware Ceiling line
                 xs.push(ks.map(k => k.x));
                 ys.push(ks.map(k => k.y));
                 symbols.push(ks.map(k => k.symbol));
 
                 const stageTexts = [];
+                const stageTextPos = [];
                 const stageCdatas = [];
 
                 ks.forEach((k, kIdx) => {{
@@ -994,23 +1362,27 @@ def generate_dashboard(stages: list[dict], output_path: Path):
                     const cluster = clusters.find(c => Math.abs(c.lx - lx) < eps && Math.abs(c.ly - ly) < eps);
                     const count = cluster ? cluster.members.length : 1;
                     const lastMember = cluster ? cluster.members[cluster.members.length - 1] : null;
-                    const stageNames = cluster ? cluster.members.map(m => m.stage).join(' & ') : ROOFLINE_STAGE_DATA[sIdx].stage;
+                    const stageNames = cluster ? cluster.members.map(m => m.stage).join(' & ') : sObj.stage;
+                    const dispLabel = k.short_label || k.label;
+
+                    stageTextPos.push(cluster ? cluster.textPos : 'top center');
 
                     // Only draw the text label on the top-most overlapping marker to keep font crisp
                     if (count > 1) {{
                         if (lastMember && lastMember.sIdx === sIdx && lastMember.kIdx === kIdx) {{
-                            stageTexts.push(`${{k.label}} (×${{count}})`);
+                            stageTexts.push(`${{dispLabel}} (×${{count}})`);
                         }} else {{
                             stageTexts.push('');
                         }}
                     }} else {{
-                        stageTexts.push(k.label);
+                        stageTexts.push(dispLabel);
                     }}
 
-                    stageCdatas.push([k.phase, k.exec_us, k.dram_gbps, k.label, stageNames]);
+                    stageCdatas.push([k.phase, k.exec_us, k.dram_gbps, k.label, stageNames, sObj.track.toUpperCase()]);
                 }});
 
                 texts.push(stageTexts);
+                textPositions.push(stageTextPos);
                 cdatas.push(stageCdatas);
             }});
 
@@ -1018,6 +1390,7 @@ def generate_dashboard(stages: list[dict], output_path: Path):
                 x: xs,
                 y: ys,
                 text: texts,
+                textposition: textPositions,
                 customdata: cdatas,
                 'marker.symbol': symbols
             }}, traceIndices);
@@ -1065,7 +1438,30 @@ def generate_dashboard(stages: list[dict], output_path: Path):
 
         document.addEventListener('DOMContentLoaded', () => {{
             filterNcuTable();
-            filterRooflinePlot();
+            setGlobalTrack(currentGlobalTrack);
+
+            // Re-scale axes or re-filter Roofline labels whenever user clicks a stage in a Plotly legend
+            const p1 = document.getElementById('plot1-pareto');
+            const p2 = document.getElementById('plot2-prefill');
+            const p3 = document.getElementById('plot3-decode');
+            const p4 = document.getElementById('roofline-plot');
+
+            if (p1 && p1.on) p1.on('plotly_restyle', () => setTimeout(rescalePlot1Axes, 20));
+            if (p2 && p2.on) p2.on('plotly_restyle', () => setTimeout(rescalePlot2Axes, 20));
+            if (p3 && p3.on) p3.on('plotly_restyle', () => setTimeout(rescalePlot3Axes, 20));
+            if (p4 && p4.on) {{
+                let filteringRoof = false;
+                p4.on('plotly_restyle', (evtData) => {{
+                    if (filteringRoof) return;
+                    if (evtData && evtData[0] && ('visible' in evtData[0])) {{
+                        filteringRoof = true;
+                        setTimeout(() => {{
+                            filterRooflinePlot();
+                            filteringRoof = false;
+                        }}, 20);
+                    }}
+                }});
+            }}
         }});
     </script>
 </body>
@@ -1094,7 +1490,10 @@ def main():
     if args.stages:
         stage_dirs = [base_dir / s for s in args.stages if (base_dir / s).is_dir()]
     else:
-        stage_dirs = sorted([d for d in base_dir.iterdir() if d.is_dir()]) if base_dir.exists() else []
+        stage_dirs = sorted(
+            [d for d in base_dir.iterdir() if d.is_dir()],
+            key=stage_sort_key,
+        ) if base_dir.exists() else []
 
     if not stage_dirs:
         raise SystemExit(f"No valid stage directories found in '{base_dir}'.")
@@ -1105,6 +1504,7 @@ def main():
         s for s in stages_data
         if s["pareto"] or s["context"] or s["nsys"] or s["ncu"]
     ]
+    stages_data.sort(key=stage_sort_key)
 
     if not stages_data:
         raise SystemExit(f"No benchmark data found in stage directories of '{base_dir}'.")
