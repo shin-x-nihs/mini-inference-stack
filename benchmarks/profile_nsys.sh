@@ -141,9 +141,9 @@ decode_steps = max(1, expected_out - 1)
 conn = sqlite3.connect(sqlite_path)
 cur = conn.cursor()
 
-# 1. Fetch all GPU kernel executions with demangled names and gridX
+# 1. Fetch all GPU kernel executions with demangled names, gridX, and correlationId
 cur.execute("""
-    SELECT k.start, k.end, COALESCE(s.value, ''), COALESCE(k.gridX, 0)
+    SELECT k.start, k.end, COALESCE(s.value, ''), COALESCE(k.gridX, 0), k.correlationId
     FROM CUPTI_ACTIVITY_KIND_KERNEL k
     LEFT JOIN StringIds s ON k.demangledName = s.id
     ORDER BY k.start ASC
@@ -160,7 +160,7 @@ num_kernels = len(kernels)
 
 # 2. Interval union for exact non-overlapping GPU Active vs. Idle time
 merged = []
-for s, e, _, _ in kernels:
+for s, e, _, _, _ in kernels:
     if not merged or s > merged[-1][1]:
         merged.append([s, e])
     else:
@@ -171,12 +171,28 @@ gpu_idle_ns = max(0, wall_ns - gpu_active_ns)
 gpu_active_pct = (gpu_active_ns / wall_ns) * 100.0
 gpu_idle_pct = 100.0 - gpu_active_pct
 
-# 3. Classify GPU kernel time by operator category (Linear vs. Attention vs. Norm/Other)
+# 3. Classify GPU kernel time by operator category (NVTX attn_compute -> name heuristic)
+attn_corr_ids = set()
+cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='NVTX_EVENTS'")
+has_nvtx_table = cur.fetchone() is not None
+if has_nvtx_table:
+    cur.execute("""
+        SELECT DISTINCT r.correlationId
+        FROM NVTX_EVENTS n
+        LEFT JOIN StringIds ns ON n.textId = ns.id
+        JOIN CUPTI_ACTIVITY_KIND_RUNTIME r
+          ON r.globalTid = n.globalTid AND r.start >= n.start AND r.end <= n.end
+        WHERE n.end > n.start AND LOWER(COALESCE(n.text, ns.value, '')) = 'attn_compute'
+    """)
+    attn_corr_ids = {row[0] for row in cur.fetchall()}
+
 cat_ns = {"linear": 0, "attention": 0, "norm_act_other": 0}
-for s, e, name, _ in kernels:
+for s, e, name, _, corr_id in kernels:
     dur = max(0, e - s)
     low = name.lower()
-    if any(k in low for k in ("gemm", "gemv", "cutlass", "cublas", "matmul", "wgrad", "dgrad")):
+    if corr_id in attn_corr_ids:
+        cat_ns["attention"] += dur
+    elif any(k in low for k in ("gemm", "gemv", "cutlass", "cublas", "matmul", "wgrad", "dgrad")):
         cat_ns["linear"] += dur
     elif any(k in low for k in ("flash", "attention", "fmha", "splitkv", "sdpa", "paged_attention")):
         cat_ns["attention"] += dur

@@ -184,16 +184,22 @@ class NaiveAttention(nn.Module):
 
         q, k = apply_rotary_pos_emb(q, k, cos, sin)
 
-        if self.num_kv_groups > 1:
-            k = k.repeat_interleave(self.num_kv_groups, dim=1)
-            v = v.repeat_interleave(self.num_kv_groups, dim=1)
+        if hidden_states.is_cuda:
+            torch.cuda.nvtx.range_push("attn_compute")
+        try:
+            if self.num_kv_groups > 1:
+                k = k.repeat_interleave(self.num_kv_groups, dim=1)
+                v = v.repeat_interleave(self.num_kv_groups, dim=1)
 
-        scores = torch.matmul(q, k.transpose(-2, -1)) * self.scale
-        scores = scores.masked_fill(causal_mask, float("-inf"))
-        probs = F.softmax(scores, dim=-1, dtype=torch.float32).to(q.dtype)
-        out = torch.matmul(probs, v)
+            scores = torch.matmul(q, k.transpose(-2, -1)) * self.scale
+            scores = scores.masked_fill(causal_mask, float("-inf"))
+            probs = F.softmax(scores, dim=-1, dtype=torch.float32).to(q.dtype)
+            out = torch.matmul(probs, v)
 
-        out = out.transpose(1, 2).contiguous().reshape(bsz, seq_len, self.num_heads * self.head_dim)
+            out = out.transpose(1, 2).contiguous().reshape(bsz, seq_len, self.num_heads * self.head_dim)
+        finally:
+            if hidden_states.is_cuda:
+                torch.cuda.nvtx.range_pop()
         return self.o_proj(out)
 
 

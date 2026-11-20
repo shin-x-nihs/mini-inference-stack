@@ -23,7 +23,7 @@ This project explores how LLM inference works and how GPU optimizations affect i
 
 The codebase is organized into **two parallel folds**:
 * **`vllm-reference/` (Reference Track):** Production-grade vLLM implementations used to establish upper-bound performance targets, latency boundaries, and reference profiler traces. **(Philosophy: Feature Isolation — evaluating one high-level optimization at a time).**
-* **`custom-serving/` (Custom Track):** Progressive, from-scratch inference implementations (currently scaffolded at `stage-0-baseline`) progressing through custom kernels and memory managers, built to demystify GPU performance from first principles. **(Philosophy: Strictly Additive — redoing history by stacking each optimization on top of the last).**
+* **`custom-serving/` (Custom Track):** Progressive, from-scratch inference implementations (currently at `stage-0-baseline`) progressing through custom kernels and memory managers, built to demystify GPU performance from first principles. **(Philosophy: Strictly Additive — redoing history by stacking each optimization on top of the last).**
 
 The goal isn't to build a replacement for vLLM. It's to learn by experimenting: measure the baseline, find out where execution time is spent, implement optimizations one step at a time, and compare the results.
 
@@ -77,7 +77,8 @@ mini-inference-stack/
 │   ├── stage-1-spec-dec/           # vLLM speculative decoding server (Stage 1)
 │   └── stage-2-prefix-cache/       # vLLM automatic prefix caching server (Stage 2)
 ├── custom-serving/                 # Custom track: from-scratch inference engines
-│   └── stage-0-baseline/           # Scaffolded baseline directory (README only; planned)
+│   ├── README.md                   # Custom track architecture notes & file inventory
+│   └── stage-0-baseline/           # Naive PyTorch baseline (Stage 0; no KV cache/SDPA)
 └── benchmarks/                     # Benchmark and profiling suite
     ├── bench_closed_loop.sh        # Closed-loop concurrency & context sweeps
     ├── profile_nsys.sh             # Nsight Systems timeline profiling
@@ -142,6 +143,9 @@ In Terminal 1:
 
 # Or Reference Track Stage 2: Automatic Prefix Caching
 ./vllm-reference/stage-2-prefix-cache/serve.sh
+
+# Custom Track Stage 0: Naive PyTorch Baseline
+./custom-serving/stage-0-baseline/serve.sh
 ```
 
 ### 2. Run Benchmarks
@@ -151,9 +155,10 @@ In Terminal 2 (while the server is running):
 ```bash
 # Run both concurrency and context-length sweeps (closed loop)
 ./benchmarks/bench_closed_loop.sh stage-0-vllm
-# Or for Stage 1 / Stage 2:
+# Or for Stage 1 / Stage 2 / Custom Stage 0:
 ./benchmarks/bench_closed_loop.sh stage-1-vllm
 ./benchmarks/bench_closed_loop.sh stage-2-vllm
+./benchmarks/bench_closed_loop.sh stage-0-custom
 ```
 
 ### 3. Profile GPU Execution
@@ -163,8 +168,10 @@ In Terminal 2 (while the server is running):
 ./benchmarks/profile_nsys.sh stage-0-vllm
 ./benchmarks/profile_nsys.sh stage-1-vllm
 ./benchmarks/profile_nsys.sh stage-2-vllm
+./benchmarks/profile_nsys.sh stage-0-custom
 
-# Kernel profile (runs standalone; stop the server first to avoid GPU memory contention)
+# Kernel profile (vLLM-only; stop the server first to avoid GPU memory contention.
+# Custom Stage 0 defers NCU profiling to Stage 1.)
 ./benchmarks/profile_ncu.sh stage-0-vllm
 ./benchmarks/profile_ncu.sh stage-1-vllm
 ./benchmarks/profile_ncu.sh stage-2-vllm
@@ -177,7 +184,7 @@ In Terminal 2 (while the server is running):
 uv run python benchmarks/plot_dashboard.py
 
 # Compare specific stages
-uv run python benchmarks/plot_dashboard.py --stages stage-0-vllm stage-1-vllm stage-2-vllm -o comparison.html
+uv run python benchmarks/plot_dashboard.py --stages stage-0-vllm stage-1-vllm stage-2-vllm stage-0-custom -o comparison.html
 ```
 
 ---
@@ -195,8 +202,8 @@ Each stage explores one main question at a time, checks that the implementation 
    Enable RadixAttention KV-block reuse (`--enable-prefix-caching`) to eliminate redundant prefill compute and queuing tail latency across shared prompts. See [REPORTS.md](REPORTS.md) for concurrency scaling (+133.3% throughput at $C=64$) and bottleneck-shift measurements.
 
 ### Custom Track (From Scratch)
-4. **Custom Stage 0: Minimal PyTorch Baseline (`stage-0-custom`) (Scaffolded / Planned)**  
-   Build a simple forward pass and generation loop to understand the model's operations, memory use, and CPU overhead from first principles.
+4. **Custom Stage 0: Minimal PyTorch Baseline (`stage-0-custom`)**  
+   Build a strict first-principles forward pass and generation loop (no KV cache, no SDPA, serialized via `asyncio.Lock`) to establish the unoptimized baseline and quantify full-sequence recomputation and launch overhead. See [custom-serving/README.md](custom-serving/README.md).
 5. **Custom Stage 1: KV Caching (Planned)**  
    Measure the cost of recomputing attention keys and values, then test how caching changes generation speed.
 6. **Custom Stage 2: Tiled Attention (FlashAttention-style) (Planned)**  
@@ -222,7 +229,7 @@ These are learning experiments, not guaranteed improvements. Each optimization i
 | **vLLM Stage 2: Automatic prefix caching** | Tested | Server script, benchmark sweeps, `nsys` and `ncu` profiles |
 | **Benchmark & profiling suite** | Tested | `bench_closed_loop.sh`, `profile_nsys.sh`, `profile_ncu.sh` |
 | **Comparison dashboard** | Implemented | Interactive Plotly HTML report (`benchmarks/plot_dashboard.py`) |
-| **Custom Stage 0: Naive PyTorch** | Scaffolded | Directory & README scaffolded (`custom-serving/stage-0-baseline/`, no engine code yet) |
+| **Custom Stage 0: Naive PyTorch** | Tested | From-scratch model, naive engine, FastAPI SSE server, parity test, closed-loop sweeps (`C=1..16`, `L=128..2048`), `nsys` profile |
 | **Custom Stages 1–5: Optimizations** | Planned | KV cache, tiled attention, split-K decode, paged KV, operator fusion |
 
 ---

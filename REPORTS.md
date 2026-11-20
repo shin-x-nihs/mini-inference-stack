@@ -338,9 +338,25 @@ The system bottleneck transitioned across optimization stages:
 
 ## custom-serving
 
-### Stage 1: KV Caching
+### Stage 1: KV Caching (`stage-1-custom`)
+
+*Server directory: `custom-serving/stage-1-kv-cache/` | Benchmark stage: `stage-1-custom`*
 
 #### 1. Motivation
+
+##### Observation (Stage 0 Baseline: `stage-0-custom`)
+Profiling our naive PyTorch baseline (`Qwen2.5-Coder-1.5B-Instruct`, `bfloat16`, RTX 5080) showed that generation is slow because every decode step recomputes the entire `[1, L + t]` sequence from scratch instead of reusing past Keys and Values:
+* **Decode dominates wall time:** For `1024` input / `64` output tokens ($C=1$), total wall time is **7.12 s** (vs. **867.3 ms** in `stage-0-vllm`), with **97.7%** spent in decode (**6,954.1 ms** total, **110.38 ms/token** avg vs. **10.67 ms/token** in vLLM).
+* **Context length collapses decode speed:** At $C=1$, prefill TTFT at $L=2048$ is reasonable (**275.87 ms** vs. **208.14 ms** in vLLM), but decode TPOT more than doubles every time context doubles: **52.68 ms** ($L=512$) $\to$ **120.72 ms** ($L=1024$) $\to$ **265.51 ms** ($L=2048$, **3.76 tok/s**).
+* **Redundant compute everywhere:** Without a KV cache, every decode token runs $M = S$ linear GEMMs (**64.5%** of GPU time) and $O(S^2)$ materialized attention (**26.7%** of GPU time) across all 28 layers.
+
+##### Hypothesis
+Caching each layer's Key and Value tensors after prefill and only feeding the single newest token ($M=1$) on each decode step will eliminate redundant prompt recomputation. Linear layers drop from $O(S)$ to $O(1)$ work per step, and attention drops from $O(S^2)$ to $O(S)$.
+
+##### Expected Results
+* **Decode latency (TPOT):** Sharp drop across all context lengths, flattening the steep TPOT curve at $L=512\text{--}2048$ (and making $L=4096\text{--}8192$ practical to benchmark).
+* **Prefill (TTFT):** Roughly unchanged, since prefill still processes all $L$ prompt tokens once.
+* **Next bottleneck:** Once decode drops to $M=1$, linear projections become memory-bandwidth-bound GEMVs, and PyTorch eager launch overhead (`~1,331` kernels/step) will stand out more clearly.
 
 #### 2. Experiment Setup
 
