@@ -53,3 +53,8 @@ benchmarks:
     input_len: 1024
     output_len: 64
     ncu_input_len: 2048
+
+# Physical hardware ceilings for Roofline plots (NVIDIA RTX 5080 Laptop GPU)
+hardware_ceilings:
+  estimated_peak_dram_gbps: 896.0
+  estimated_peak_tensor_tflops: 40.0

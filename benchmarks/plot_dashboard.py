@@ -322,8 +322,8 @@ def build_plot4_roofline(stages: list[dict]) -> tuple[go.Figure, str, str]:
 
     fig = go.Figure(layout=layout)
 
-    peak_bw_gbps = 512.0
-    peak_compute_tflops = 100.0
+    peak_bw_gbps = 896.0
+    peak_compute_tflops = 40.0
     for s in stages:
         if s["ncu"] and "hardware_ceilings" in s["ncu"]:
             c = s["ncu"]["hardware_ceilings"]
@@ -536,8 +536,8 @@ def build_tables_html(stages: list[dict]) -> str:
         if not ncu:
             continue
         ceilings = ncu.get("hardware_ceilings", {})
-        peak_dram = ceilings.get("estimated_peak_dram_gbps", 512.0)
-        peak_tc = ceilings.get("estimated_peak_tensor_tflops", 100.0)
+        peak_dram = ceilings.get("estimated_peak_dram_gbps", 896.0)
+        peak_tc = ceilings.get("estimated_peak_tensor_tflops", 40.0)
 
         for k in ncu.get("kernels", []):
             dram_pct = k.get("dram_utilization_pct", 0.0)

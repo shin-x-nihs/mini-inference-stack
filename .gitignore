@@ -70,5 +70,6 @@ desktop.ini
 
 # Local agent guides (root + subfolders)
 **/AGENTS.md
+UPDATE_PROMPT.md
 repomix-output.xml
 repomix.sh

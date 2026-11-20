@@ -18,7 +18,7 @@ This document records the main experiments across the `vllm-reference` and `cust
 Profiling the baseline vLLM engine running `Qwen2.5-Coder-1.5B-Instruct` on an RTX 5080 Laptop GPU showed that token generation is overwhelmingly dominated by the decode phase, specifically dense linear layers:
 * **Decode dominance:** Decode accounts for **77.5%** of total wall time (672.3 ms out of 867.3 ms for 1024 prompt / 64 output tokens at concurrency $C=1$).
 * **Linear layer bottleneck:** Matrix multiplications consume **91.9%** (704.9 ms) of all GPU kernel time, whereas attention accounts for only **0.7%** (5.1 ms).
-* **Memory-bound execution:** Nsight Compute reports that `Decode Linear GEMV` runs at an Arithmetic Intensity of **1.001 FLOP/Byte**, streaming weights from DRAM at **321.1 GB/s** (62.7% of physical peak) while attaining only **0.32 TFLOP/s** of compute (0.3% of Tensor Core peak).
+* **Memory-bound execution:** Nsight Compute reports that `Decode Linear GEMV` runs at an Arithmetic Intensity of **1.001 FLOP/Byte**, streaming weights from DRAM at **321.1 GB/s** (**35.8%** of the 896 GB/s physical GDDR7 peak; **70.9%** NCU sustained-clock DRAM utilization) while attaining only **0.32 TFLOP/s** of compute (**0.8%** of the 40 TFLOP/s Tensor Core Roofline ceiling; **41.5%** NCU SM throughput).
 
 Streaming entire model weights from VRAM for a single token vector ($M=1$) leaves compute hardware mostly idle.
 
@@ -118,8 +118,8 @@ Profiling traces (`timeline.nsys-rep` and `kernels.ncu-rep`) explain both why th
 
 #### 1. Kernel Shift (Nsight Compute)
 The hypothesis regarding the decode linear layer was confirmed on hardware:
-* **Stage 0 Baseline:** Ran `Decode Linear GEMV` with $\text{AI} = \mathbf{1.001\text{ FLOP/Byte}}$, achieving $0.32\text{ TFLOP/s}$ at $321.1\text{ GB/s}$ DRAM throughput.
-* **Stage 1 Speculative:** Ran `Decode Linear GEMM` with $\text{AI} = \mathbf{15.473\text{ FLOP/Byte}}$ (<span style="color:#10b981;">**$15.5\times$ increase**</span>) and attained performance jumped to $\mathbf{5.037\text{ TFLOP/s}}$ (<span style="color:#10b981;">**$15.7\times$ increase**</span>) at $325.6\text{ GB/s}$ DRAM throughput.
+* **Stage 0 Baseline:** Ran `Decode Linear GEMV` with $\text{AI} = \mathbf{1.001\text{ FLOP/Byte}}$, achieving $0.32\text{ TFLOP/s}$ (**0.8%** of the 40 TFLOP/s ceiling; **41.5%** NCU SM throughput) at $321.1\text{ GB/s}$ DRAM throughput (**35.8%** of 896 GB/s peak; **70.9%** NCU DRAM utilization).
+* **Stage 1 Speculative:** Ran `Decode Linear GEMM` with $\text{AI} = \mathbf{15.473\text{ FLOP/Byte}}$ (<span style="color:#10b981;">**$15.5\times$ increase**</span>) and attained performance jumped to $\mathbf{5.037\text{ TFLOP/s}}$ (<span style="color:#10b981;">**$15.7\times$ increase**</span>, **12.6%** of the 40 TFLOP/s ceiling; **28.4%** NCU SM throughput) at $325.6\text{ GB/s}$ DRAM throughput (**36.3%** of 896 GB/s peak; **71.9%** NCU DRAM utilization).
 * Total decode duration on the target model decreased from **672.3 ms down to 556.5 ms** (average decode step dropped from 10.67 ms to 8.83 ms).
 
 #### 2. Host Orchestration Overhead (Nsight Systems)
@@ -154,8 +154,8 @@ Even with a 98% acceptance rate, draft-model execution and engine management con
 | :--- | :--- | :--- |
 | **Throughput & TPOT** | `benchmarks/results/{stage}/pareto_c*.json` | `output_throughput`, `mean_tpot_ms` |
 | **Context Latencies** | `benchmarks/results/{stage}/context_l*.json` | `mean_ttft_ms`, `mean_tpot_ms` |
-| **Timeline Breakdown** | `benchmarks/profiles/{stage}/nsys_metrics.json` | `wall_time_ms`, `decode_total_ms`, `cpu_launch_overhead_ms` |
-| **Kernel Roofline** | `benchmarks/profiles/{stage}/ncu_metrics.json` | `achieved_dram_gbps`, `attained_tflops`, `arithmetic_intensity_flop_byte` |
+| **Timeline Breakdown** | `benchmarks/results/{stage}/nsys_metrics.json` | `wall_time_ms`, `decode_total_ms`, `cpu_launch_overhead_ms` |
+| **Kernel Roofline** | `benchmarks/results/{stage}/ncu_metrics.json` | `achieved_dram_gbps`, `attained_tflops`, `arithmetic_intensity_flop_byte` |
 | **Interactive Plots** | `benchmarks/results/dashboard.html` | Generated comparison dashboard |
 
 *All percentage deltas are calculated directly from raw benchmark JSON outputs. Profiler counters represent activity during sampled kernel windows and serve to support engineering hypotheses rather than absolute proof of single-variable causation.*
@@ -277,13 +277,13 @@ Profiling traces (`timeline.nsys-rep` and `kernels.ncu-rep`) confirm the exact h
 
 #### 1. Nsight Compute Roofline & Kernel Shift (Layer 0 Analysis)
 Nsight Compute profiled Layer 0 across 1 Prefill pass ($L=2048$) and 1 Decode pass ($M=1, C=1$):
-* **Prefill Linear GEMM:** Execution time **4,144.61 µs**, Arithmetic Intensity = **970.44 FLOP/Byte**, Attained Compute = **27.22 TFLOP/s**, Achieved DRAM Throughput = **28.05 GB/s**.  
+* **Prefill Linear GEMM:** Execution time **4,144.61 µs**, Arithmetic Intensity = **970.44 FLOP/Byte**, Attained Compute = **27.22 TFLOP/s** (**68.1%** of 40 TFLOP/s ceiling; **94.8%** NCU SM throughput), Achieved DRAM Throughput = **28.05 GB/s** (**3.1%** of 896 GB/s peak; **6.2%** NCU DRAM utilization).  
   *Bottleneck:* **Compute-Bound.** With arithmetic intensity near $1000\text{ FLOP/B}$, prefill GEMMs saturate Tensor Cores. Performing this computation redundantly for shared prefixes is the root cause of GPU compute starvation.
-* **Prefill Attention (SplitKV):** Execution time **750.40 µs**, Arithmetic Intensity = **1,630.98 FLOP/Byte**, Attained Compute = **18.39 TFLOP/s**, DRAM Throughput = **11.28 GB/s**.  
+* **Prefill Attention (SplitKV):** Execution time **750.40 µs**, Arithmetic Intensity = **1,630.98 FLOP/Byte**, Attained Compute = **18.39 TFLOP/s** (**46.0%** of 40 TFLOP/s ceiling; **64.4%** NCU SM throughput), DRAM Throughput = **11.28 GB/s** (**1.3%** of 896 GB/s peak; **2.5%** NCU DRAM utilization).  
   *Bottleneck:* **Compute-Bound.**
-* **Prefill SwiGLU Activation:** Execution time **249.86 µs**, Arithmetic Intensity = **5.55 FLOP/Byte**, DRAM Throughput = **344.27 GB/s** (67.2% of 512 GB/s physical peak).  
+* **Prefill SwiGLU Activation:** Execution time **249.86 µs**, Arithmetic Intensity = **5.55 FLOP/Byte**, DRAM Throughput = **344.27 GB/s** (**38.4%** of 896 GB/s physical peak; **76.0%** NCU sustained-clock DRAM utilization).  
   *Bottleneck:* **Memory-Bandwidth Bound.**
-* **Decode Linear GEMV:** Execution time **177.22 µs**, Arithmetic Intensity = **1.007 FLOP/Byte**, Attained Compute = **0.322 TFLOP/s**, Achieved DRAM Throughput = **320.16 GB/s** (62.5% of 512 GB/s peak).  
+* **Decode Linear GEMV:** Execution time **177.22 µs**, Arithmetic Intensity = **1.007 FLOP/Byte**, Attained Compute = **0.322 TFLOP/s** (**0.8%** of 40 TFLOP/s ceiling; **41.0%** NCU SM throughput), Achieved DRAM Throughput = **320.16 GB/s** (**35.7%** of 896 GB/s physical peak; **70.7%** NCU sustained-clock DRAM utilization).  
   *Bottleneck:* **Strictly Memory-Bandwidth Bound.**
 * **Decode Attention (FlashDecode/SplitKV):** Execution time **26.43 µs**, Arithmetic Intensity = **66.68 FLOP/Byte**, DRAM Throughput = **81.56 GB/s**.
 

@@ -1,8 +1,8 @@
 # Engineering Workflow
 
 A shared guide for running the inference server, checking functionality, benchmarking workloads, profiling GPU behavior, and comparing optimization stages across both project tracks:
-* **Reference track (`vllm-reference/`):** vLLM reference implementations (`stage-0-baseline`, `stage-1-spec-dec`).
-* **Custom track (`custom-serving/`):** Progressive from-scratch implementations starting from `stage-0-baseline` through custom kernels and memory layouts.
+* **Reference track (`vllm-reference/`):** vLLM reference implementations (`stage-0-baseline`, `stage-1-spec-dec`, `stage-2-prefix-cache`).
+* **Custom track (`custom-serving/`):** Progressive from-scratch implementations (planned, starting from `stage-0-baseline`).
 
 > **Core Principle:** Keep experiments repeatable—change one variable at a time and record the environment and settings.
 
@@ -66,13 +66,16 @@ In **Terminal 1**:
 
 # Or Reference Track Stage 1: Speculative Decoding
 ./vllm-reference/stage-1-spec-dec/serve.sh
+
+# Or Reference Track Stage 2: Automatic Prefix Caching
+./vllm-reference/stage-2-prefix-cache/serve.sh
 ```
 
 Wait until the model has loaded and the server reports readiness. The reference API is available at `http://127.0.0.1:8000/v1`.
 
 For another implementation, start its documented server script. Keep the API interface and port consistent where practical so the same client and benchmark harness can be reused.
 
-> **Note on Stage Names:** Server directories are named by path (`vllm-reference/stage-0-baseline/`, `vllm-reference/stage-1-spec-dec/`, `custom-serving/stage-0-baseline/`), while runner and benchmark scripts take stage identifiers (`stage-0-vllm`, `stage-1-vllm`, `stage-0-custom`, `stage-1-custom`), which directly name the result folders under `benchmarks/results/<stage-name>/`.
+> **Note on Stage Names:** Server directories are named by path (`vllm-reference/stage-0-baseline/`, `vllm-reference/stage-1-spec-dec/`, `vllm-reference/stage-2-prefix-cache/`, and planned `custom-serving/stage-0-baseline/`), while runner and benchmark scripts take stage identifiers (`stage-0-vllm`, `stage-1-vllm`, `stage-2-vllm`, and future `stage-0-custom`), which directly name the result folders under `benchmarks/results/<stage-name>/`.
 
 ### Profiler-Ready Launch (Nsight Systems)
 
@@ -80,8 +83,9 @@ To capture serving activity without including model startup, launch the referenc
 
 ```bash
 NSYS=ON ./vllm-reference/stage-0-baseline/serve.sh
-# or for Stage 1:
+# or for Stage 1 / Stage 2:
 NSYS=ON ./vllm-reference/stage-1-spec-dec/serve.sh
+NSYS=ON ./vllm-reference/stage-2-prefix-cache/serve.sh
 ```
 
 *Use this only if the implementation's launch script supports the `NSYS` option.*
@@ -146,6 +150,9 @@ In **Terminal 2**:
 
 # Benchmark Reference Stage 1
 ./benchmarks/bench_closed_loop.sh stage-1-vllm
+
+# Benchmark Reference Stage 2
+./benchmarks/bench_closed_loop.sh stage-2-vllm
 ```
 
 The standard closed-loop script runs two sweeps:
@@ -165,16 +172,6 @@ When iterating on a specific optimization:
 ```
 
 Use the stage name to keep outputs separate. Results are stored under `benchmarks/results/<stage-name>/`.
-
-### Open-Loop Load Testing (Experimental)
-
-While closed-loop sweeps measure capacity by keeping client concurrency fixed, open-loop benchmarks test behavior under varying offered loads (Poisson/QPS arrival rates):
-
-```bash
-./benchmarks/bench_open_loop\(temporary\).sh <stage-name>
-```
-
-This tests queue buildup, scheduling stalls, and tail-latency degradation when requests arrive independently of response completions.
 
 ### Keep Comparisons Fair
 
@@ -200,14 +197,16 @@ Nsight Systems captures the overall timeline: CPU activity, CUDA calls, GPU kern
 * **Terminal 1:** Start the reference server in profiler-ready mode:
   ```bash
   NSYS=ON ./vllm-reference/stage-0-baseline/serve.sh
-  # or for Stage 1:
+  # or for Stage 1 / Stage 2:
   NSYS=ON ./vllm-reference/stage-1-spec-dec/serve.sh
+  NSYS=ON ./vllm-reference/stage-2-prefix-cache/serve.sh
   ```
 * **Terminal 2:** Run the profile:
   ```bash
   ./benchmarks/profile_nsys.sh stage-0-vllm
-  # or for Stage 1:
+  # or for Stage 1 / Stage 2:
   ./benchmarks/profile_nsys.sh stage-1-vllm
+  ./benchmarks/profile_nsys.sh stage-2-vllm
   ```
 
 **Outputs:**
@@ -235,11 +234,9 @@ Nsight Compute examines selected kernels in more detail, including execution tim
   # Reference track (vLLM)
   ./benchmarks/profile_ncu.sh stage-0-vllm
   ./benchmarks/profile_ncu.sh stage-1-vllm
-
-  # Custom track (from scratch)
-  ./benchmarks/profile_ncu.sh stage-0-custom
-  ./benchmarks/profile_ncu.sh stage-1-custom
+  ./benchmarks/profile_ncu.sh stage-2-vllm
   ```
+  *(Custom stages are planned; once implemented under `custom-serving/`, each stage will need its own NCU runner emitting the `ncu_metrics.json` schema—see `custom-serving/AGENTS.md`.)*
 
 For `stage-1-vllm` (or stages containing speculative decoding), the script automatically detects the draft model and profiles Target Layer 0 verification at batch size $M = K + 1$ (where $K$ is the number of drafted tokens) alongside Prefill. For standard stages, it profiles single-token decode ($M = 1$).
 
@@ -276,7 +273,7 @@ uv run python benchmarks/plot_dashboard.py
 uv run python benchmarks/plot_dashboard.py --stages stage-0-vllm
 
 # Compare stages
-uv run python benchmarks/plot_dashboard.py --stages stage-0-vllm stage-1-vllm -o comparison.html
+uv run python benchmarks/plot_dashboard.py --stages stage-0-vllm stage-1-vllm stage-2-vllm -o comparison.html
 ```
 
 Open the generated HTML file in a browser. By default, the dashboard is saved to `benchmarks/results/dashboard.html`; when using `-o`, check the path supplied to that option.
@@ -355,26 +352,28 @@ Where:
 
 ---
 
-## Adding New Optimization Stages
+## Adding New Optimization Stages & Track Philosophy
 
-Use the same workflow for each new vLLM configuration or self-made engine:
+The two project tracks operate under fundamentally different design philosophies. When adding a new stage, follow the rule for its respective track:
 
-1. **Keep the reference unchanged:** Create a new implementation or stage directory rather than modifying the reference baseline to test an idea.
-2. **Keep workloads identical:** Do not change shared benchmark sizes between stages for a direct comparison.
-3. **Isolate the optimization:** Change one kernel or algorithmic mechanism at a time where practical.
-4. **Reuse the harness:** Use the shared configuration and benchmark scripts when their assumptions still apply. Document any required adapter or workload difference.
-5. **Use a unique stage name:** Pass it to the benchmark and profiling scripts so outputs remain separate.
-6. **Validate before measuring:** Confirm functional correctness, then benchmark, plot, and profile as needed.
-7. **Record the conclusion:** Include negative results and any differences that limit the comparison.
+### 1. The Custom Track: Strictly Additive (Redoing History)
+The `custom-serving/` track reconstructs the historical evolution of LLM inference from first principles. Because foundational bottlenecks must be solved in order, **optimizations in this track are strictly additive and stack on top of each other.**
 
-### Example Stage Execution
+* **Stage 0:** Naive PyTorch (No SDPA, No KV Cache, $O(N^2)$ attention regression).
+* **Stage 1:** Adds Naive KV Cache (Requires Stage 0; solves the decode regression).
+* **Stage 2:** Adds Tiled / FlashAttention (Requires Stage 1; solves the prefill memory wall).
+* **Stage 3:** Adds Parallel Decode Attention / Split-K (Requires Stage 2; improves decode SM occupancy at long contexts).
+* **Stage 4:** Adds Paged KV Cache (Requires Stage 3; solves batching fragmentation).
+* **Stage 5:** Adds Operator Fusion (Requires Stage 4; reduces kernel-launch and intermediate memory traffic overhead).
 
-```bash
-# Example for a custom stage
-./benchmarks/bench_closed_loop.sh stage-0-custom
-./benchmarks/profile_nsys.sh stage-0-custom
-./benchmarks/profile_ncu.sh stage-0-custom
-uv run python benchmarks/plot_dashboard.py --stages stage-0-vllm stage-0-custom -o comparison.html
-```
+**Rule for Custom:** When creating `stage-(N)`, copy the code from `stage-(N-1)` and implement exactly one architectural upgrade on top of it.
 
-Keep implementation-specific launch and profiling details near that implementation, while this file remains the common procedure. Update commands and defaults when repository scripts change, and label planned functionality as planned until it is implemented and tested.
+### 2. The vLLM Track: Feature Isolation vs. Maximum Performance
+The `vllm-reference/` track uses a production-grade engine where foundational optimizations (FlashAttention, PagedAttention, Continuous Batching) are already baked into the baseline (`stage-0-vllm`).
+
+Because we are testing high-level system features (like Speculative Decoding or Prefix Caching), **optimizations in this track are isolated to prevent profiling cross-pollution.**
+
+* **Isolated Stages (1 & 2):** We test Speculative Decoding and Prefix Caching in separate stages. If we profiled both simultaneously, CPU launch overheads from drafting would pollute the radix-tree lookup metrics, making it impossible to isolate the bottleneck.
+* **Maximum Performance Stage (Stage 3+):** Once individual features are isolated, profiled, and documented in `REPORTS.md`, we create a final `stage-3-vllm-max` that enables all features simultaneously. This serves as the ultimate "high score" upper bound for the custom track to target.
+
+**Rule for vLLM:** When creating a new vLLM stage to test a feature, branch it directly off `stage-0-baseline` unless you are explicitly building a combined "max performance" configuration.

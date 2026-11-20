@@ -18,6 +18,7 @@ m = cfg.get("model", {})
 d = cfg.get("draft_model", {})
 b = cfg.get("benchmarks", {})
 p = b.get("profiling", {})
+hc = cfg.get("hardware_ceilings", {})
 
 print(f"MODEL_NAME='{m.get('name', 'Qwen/Qwen2.5-Coder-1.5B-Instruct')}'")
 print(f"DTYPE='{m.get('dtype', 'bfloat16')}'")
@@ -27,10 +28,24 @@ print(f"CFG_SPEC_TOKENS={d.get('num_speculative_tokens', 5)}")
 print(f"TEMPERATURE={b.get('temperature', 0.0)}")
 print(f"GPU_MEM={cfg.get('server', {}).get('gpu_memory_utilization', 0.70)}")
 print(f"PROF_IN={p.get('ncu_input_len', 2048)}")
+print(f"PEAK_DRAM_GBPS={float(hc.get('estimated_peak_dram_gbps', 896.0))}")
+print(f"PEAK_TENSOR_TFLOPS={float(hc.get('estimated_peak_tensor_tflops', 40.0))}")
 EOF
 )"
 
-STAGE="${1:-stage-0-vllm}"
+STAGE="stage-0-vllm"
+IMPORT_ONLY=0
+for arg in "$@"; do
+    case "${arg}" in
+        --import-only)
+            IMPORT_ONLY=1
+            ;;
+        *)
+            STAGE="${arg}"
+            ;;
+    esac
+done
+
 PROF_DIR="benchmarks/profiles/${STAGE}"
 RES_DIR="benchmarks/results/${STAGE}"
 mkdir -p "${PROF_DIR}" "${RES_DIR}"
@@ -63,8 +78,15 @@ echo " Profile Out:    ${PROF_DIR}"
 echo " Results JSON:   ${METRICS_JSON}"
 echo "=========================================================="
 
-# 3. Create single-process runner that profiles strictly Target Layer 0 (Pass 1 = Prefill, Pass 2 = Decode/Verify)
-cat << 'EOF' > "${RUNNER_PY}"
+if [[ "${IMPORT_ONLY}" -eq 1 ]]; then
+    if [[ ! -f "${REP_FILE}" ]]; then
+        echo "Error: Saved NCU report not found at ${REP_FILE}" >&2
+        exit 1
+    fi
+    echo ">>> [1/2] Skipping GPU capture (--import-only); reusing ${REP_FILE}"
+else
+    # 3. Create single-process runner that profiles strictly Target Layer 0 (Pass 1 = Prefill, Pass 2 = Decode/Verify)
+    cat << 'EOF' > "${RUNNER_PY}"
 import sys
 import torch
 import yaml
@@ -189,15 +211,18 @@ VLLM_ENABLE_V1_MULTIPROCESSING=0 ncu \
     --export "${REP_FILE}" \
     --force-overwrite \
     uv run python3 "${RUNNER_PY}" "${MODEL_NAME}" "${DTYPE}" "${MAX_LEN}" "${GPU_MEM}" "${PROF_IN}" "${DRAFT_MODEL}" "${SPEC_TOKENS}" "${TEMPERATURE}"
+fi
 
 echo ">>> [2/3] Exporting raw counters to CSV..."
 ncu --import "${REP_FILE}" --csv --page raw > "${CSV_FILE}"
 
 echo ">>> [3/3] Building Roofline and Kernel JSON..."
-uv run python3 - "${CSV_FILE}" "${METRICS_JSON}" "${STAGE}" << 'EOF'
+uv run python3 - "${CSV_FILE}" "${METRICS_JSON}" "${STAGE}" "${PEAK_DRAM_GBPS}" "${PEAK_TENSOR_TFLOPS}" << 'EOF'
 import csv, json, sys
 
 csv_path, json_path, stage = sys.argv[1:4]
+peak_dram_gbps = float(sys.argv[4])
+peak_tensor_tflops = float(sys.argv[5])
 
 # Keep only valid CSV lines starting from the "ID" header
 with open(csv_path, "r", encoding="utf-8") as f:
@@ -222,6 +247,13 @@ def get_float(row, key):
         return float(str(val).replace(",", ""))
     except ValueError:
         return 0.0
+
+def get_first_float(row, keys):
+    for key in keys:
+        val = row.get(key, "")
+        if val not in (None, "", "N/A"):
+            return get_float(row, key)
+    return 0.0
 
 def get_duration_ns(row, units):
     val = get_float(row, "gpu__time_duration.sum")
@@ -250,13 +282,13 @@ def classify_kernel(kname, phase):
         return f"{phase} Fused RMSNorm"
     if "rope" in kl or "rotary" in kl:
         return f"{phase} RoPE Embedding"
+    if "reshape_and_cache" in kl:
+        return f"{phase} KV Cache Write"
     if "silu" in kl or "act_and_mul" in kl:
         return f"{phase} SwiGLU Activation"
     return f"{phase} {kname[:28]}"
 
 records = []
-peak_bw_estimates = []
-peak_tflops_estimates = []
 
 total_rows = len(data_rows)
 for idx, row in enumerate(data_rows):
@@ -288,8 +320,14 @@ for idx, row in enumerate(data_rows):
     elif "kbyte" in dram_unit or dram_unit == "kb":
         dram_bytes *= 1e3
 
-    dram_pct = get_float(row, "dram__throughput.avg.pct_of_peak_sustained_active")
-    sm_pct = get_float(row, "sm__throughput.avg.pct_of_peak_sustained_active")
+    dram_pct = get_first_float(row, (
+        "gpu__dram_throughput.avg.pct_of_peak_sustained_elapsed",
+        "dram__throughput.avg.pct_of_peak_sustained_active",
+    ))
+    sm_pct = get_first_float(row, (
+        "sm__throughput.avg.pct_of_peak_sustained_elapsed",
+        "sm__throughput.avg.pct_of_peak_sustained_active",
+    ))
     warps_pct = get_float(row, "sm__warps_active.avg.pct_of_peak_sustained_active")
     regs = int(get_float(row, "launch__registers_per_thread"))
     spills = int(
@@ -316,11 +354,6 @@ for idx, row in enumerate(data_rows):
     ai = (total_flops / dram_bytes) if dram_bytes > 0 else 0.0
     tflops = (total_flops / (dur_s * 1e12)) if dur_s > 0 else 0.0
 
-    if dram_pct > 20.0 and achieved_bw_gbps > 0:
-        peak_bw_estimates.append(achieved_bw_gbps / (dram_pct / 100.0))
-    if sm_pct > 20.0 and tensor_flops > 0:
-        peak_tflops_estimates.append(tflops / (sm_pct / 100.0))
-
     if dram_pct >= sm_pct and dram_pct >= 35.0:
         bound = "Memory Bandwidth"
     elif sm_pct > dram_pct and sm_pct >= 35.0:
@@ -336,7 +369,7 @@ for idx, row in enumerate(data_rows):
         "phase": phase,
         "raw_kernel_name": kname,
         "grid_size": grid_str,
-        " block_size": row.get("Block Size", ""),
+        "block_size": row.get("Block Size", ""),
         "execution_time_us": round(dur_us, 2),
         "dram_utilization_pct": round(dram_pct, 2),
         "compute_utilization_pct": round(sm_pct, 2),
@@ -361,8 +394,8 @@ final_kernels = list(dedup.values())
 payload = {
     "stage": stage,
     "hardware_ceilings": {
-        "estimated_peak_dram_gbps": round(sum(peak_bw_estimates) / len(peak_bw_estimates), 1) if peak_bw_estimates else 512.0,
-        "estimated_peak_tensor_tflops": round(sum(peak_tflops_estimates) / len(peak_tflops_estimates), 1) if peak_tflops_estimates else 100.0,
+        "estimated_peak_dram_gbps": peak_dram_gbps,
+        "estimated_peak_tensor_tflops": peak_tensor_tflops,
     },
     "kernels": final_kernels
 }

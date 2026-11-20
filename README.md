@@ -22,8 +22,8 @@
 This project explores how LLM inference works and how GPU optimizations affect its performance, using `Qwen2.5-Coder-1.5B-Instruct` on an NVIDIA GeForce RTX 5080 Laptop GPU.
 
 The codebase is organized into **two parallel folds**:
-* **`vllm-reference/` (Reference Track):** Production-grade vLLM implementations used to establish upper-bound performance targets, latency boundaries, and reference profiler traces.
-* **`custom-serving/` (Custom Track):** Progressive, from-scratch inference implementations starting from `stage-0-baseline` (minimal naive PyTorch) through custom kernels and memory managers, built to demystify GPU performance from first principles.
+* **`vllm-reference/` (Reference Track):** Production-grade vLLM implementations used to establish upper-bound performance targets, latency boundaries, and reference profiler traces. **(Philosophy: Feature Isolation — evaluating one high-level optimization at a time).**
+* **`custom-serving/` (Custom Track):** Progressive, from-scratch inference implementations (currently scaffolded at `stage-0-baseline`) progressing through custom kernels and memory managers, built to demystify GPU performance from first principles. **(Philosophy: Strictly Additive — redoing history by stacking each optimization on top of the last).**
 
 The goal isn't to build a replacement for vLLM. It's to learn by experimenting: measure the baseline, find out where execution time is spent, implement optimizations one step at a time, and compare the results.
 
@@ -74,12 +74,12 @@ mini-inference-stack/
 ├── ui/                             # Chainlit web UI for quick sanity checks
 ├── vllm-reference/                 # Reference track: vLLM reference implementations
 │   ├── stage-0-baseline/           # vLLM baseline server (Stage 0)
-│   └── stage-1-spec-dec/           # vLLM speculative decoding server (Stage 1)
+│   ├── stage-1-spec-dec/           # vLLM speculative decoding server (Stage 1)
+│   └── stage-2-prefix-cache/       # vLLM automatic prefix caching server (Stage 2)
 ├── custom-serving/                 # Custom track: from-scratch inference engines
-│   └── stage-0-baseline/           # Minimal PyTorch baseline server
+│   └── stage-0-baseline/           # Scaffolded baseline directory (README only; planned)
 └── benchmarks/                     # Benchmark and profiling suite
     ├── bench_closed_loop.sh        # Closed-loop concurrency & context sweeps
-    ├── bench_open_loop(temporary).sh # Open-loop arrival rate experiments (future strain)
     ├── profile_nsys.sh             # Nsight Systems timeline profiling
     ├── profile_ncu.sh              # Nsight Compute kernel profiling
     ├── plot_dashboard.py           # Generates the HTML comparison dashboard
@@ -139,6 +139,9 @@ In Terminal 1:
 
 # Or Reference Track Stage 1: Speculative Decoding
 ./vllm-reference/stage-1-spec-dec/serve.sh
+
+# Or Reference Track Stage 2: Automatic Prefix Caching
+./vllm-reference/stage-2-prefix-cache/serve.sh
 ```
 
 ### 2. Run Benchmarks
@@ -148,11 +151,10 @@ In Terminal 2 (while the server is running):
 ```bash
 # Run both concurrency and context-length sweeps (closed loop)
 ./benchmarks/bench_closed_loop.sh stage-0-vllm
-# Or for Stage 1:
+# Or for Stage 1 / Stage 2:
 ./benchmarks/bench_closed_loop.sh stage-1-vllm
+./benchmarks/bench_closed_loop.sh stage-2-vllm
 ```
-
-> *Note: For open-loop arrival rate experiments (evaluating queue buildup under offered load), see `./benchmarks/bench_open_loop(temporary).sh`.*
 
 ### 3. Profile GPU Execution
 
@@ -160,10 +162,12 @@ In Terminal 2 (while the server is running):
 # Timeline profile (start server with: NSYS=ON ./<track>/<stage>/serve.sh)
 ./benchmarks/profile_nsys.sh stage-0-vllm
 ./benchmarks/profile_nsys.sh stage-1-vllm
+./benchmarks/profile_nsys.sh stage-2-vllm
 
 # Kernel profile (runs standalone; stop the server first to avoid GPU memory contention)
 ./benchmarks/profile_ncu.sh stage-0-vllm
 ./benchmarks/profile_ncu.sh stage-1-vllm
+./benchmarks/profile_ncu.sh stage-2-vllm
 ```
 
 ### 4. Generate the Dashboard
@@ -173,7 +177,7 @@ In Terminal 2 (while the server is running):
 uv run python benchmarks/plot_dashboard.py
 
 # Compare specific stages
-uv run python benchmarks/plot_dashboard.py --stages stage-0-vllm stage-1-vllm -o comparison.html
+uv run python benchmarks/plot_dashboard.py --stages stage-0-vllm stage-1-vllm stage-2-vllm -o comparison.html
 ```
 
 ---
@@ -187,19 +191,21 @@ Each stage explores one main question at a time, checks that the implementation 
    Measure baseline serving performance and use profiling tools to understand how the reference implementation runs.
 2. **vLLM Stage 1: Speculative Decoding (`stage-1-vllm`)**  
    Pair a 1.5B target model with a smaller 0.5B draft model to test whether speculative decoding improves generation speed. The results show how acceptance rate, drafting overhead, and concurrency affect performance. See [REPORTS.md](REPORTS.md) for the hypothesis and measurements.
+3. **vLLM Stage 2: Automatic Prefix Caching (`stage-2-vllm`)**  
+   Enable RadixAttention KV-block reuse (`--enable-prefix-caching`) to eliminate redundant prefill compute and queuing tail latency across shared prompts. See [REPORTS.md](REPORTS.md) for concurrency scaling (+133.3% throughput at $C=64$) and bottleneck-shift measurements.
 
 ### Custom Track (From Scratch)
-3. **Custom Stage 0: Minimal PyTorch Baseline (`stage-0-custom`)**  
+4. **Custom Stage 0: Minimal PyTorch Baseline (`stage-0-custom`) (Scaffolded / Planned)**  
    Build a simple forward pass and generation loop to understand the model's operations, memory use, and CPU overhead from first principles.
-4. **Custom Stage 1: KV Caching (Planned)**  
+5. **Custom Stage 1: KV Caching (Planned)**  
    Measure the cost of recomputing attention keys and values, then test how caching changes generation speed.
-5. **Custom Stage 2: Tiled Attention (FlashAttention-style) (Planned)**  
+6. **Custom Stage 2: Tiled Attention (FlashAttention-style) (Planned)**  
    Investigate how tiling reduces intermediate memory traffic during prefill.
-6. **Custom Stage 3: Parallel Decode Attention (Split-K / FlashDecode-style) (Planned)**  
+7. **Custom Stage 3: Parallel Decode Attention (Split-K / FlashDecode-style) (Planned)**  
    Test whether splitting attention work across more thread blocks improves GPU utilization during token generation.
-7. **Custom Stage 4: Paged KV Cache (PagedAttention-style) (Planned)**  
+8. **Custom Stage 4: Paged KV Cache (PagedAttention-style) (Planned)**  
    Explore storing the KV cache in non-contiguous blocks to manage GPU memory more flexibly as requests arrive and finish.
-8. **Custom Stage 5: Operator Fusion (Planned)**  
+9. **Custom Stage 5: Operator Fusion (Planned)**  
    Measure the effect of combining operations on kernel-launch overhead and memory traffic.
 
 These are learning experiments, not guaranteed improvements. Each optimization is evaluated by measuring its results and understanding its trade-offs.
@@ -213,9 +219,10 @@ These are learning experiments, not guaranteed improvements. Each optimization i
 | **Environment setup** | Tested | WSL2 Ubuntu 24.04, CUDA 13.1, PyTorch on RTX 5080 |
 | **vLLM Stage 0: Reference baseline** | Tested | Server script, benchmark runs, `nsys` and `ncu` profiles |
 | **vLLM Stage 1: Speculative decoding** | Tested | Server script, benchmark sweeps, NCU verification profiling |
+| **vLLM Stage 2: Automatic prefix caching** | Tested | Server script, benchmark sweeps, `nsys` and `ncu` profiles |
 | **Benchmark & profiling suite** | Tested | `bench_closed_loop.sh`, `profile_nsys.sh`, `profile_ncu.sh` |
 | **Comparison dashboard** | Implemented | Interactive Plotly HTML report (`benchmarks/plot_dashboard.py`) |
-| **Custom Stage 0: Naive PyTorch** | Implemented | Minimal PyTorch baseline server (`custom-serving/stage-0-baseline/`) |
+| **Custom Stage 0: Naive PyTorch** | Scaffolded | Directory & README scaffolded (`custom-serving/stage-0-baseline/`, no engine code yet) |
 | **Custom Stages 1–5: Optimizations** | Planned | KV cache, tiled attention, split-K decode, paged KV, operator fusion |
 
 ---
