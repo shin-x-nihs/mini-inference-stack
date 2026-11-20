@@ -67,6 +67,7 @@ desktop.ini
 
 .chainlit/
 .files/
+.ruff_cache/
 
 # Local agent guides (root + subfolders)
 **/AGENTS.md

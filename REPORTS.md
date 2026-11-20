@@ -333,3 +333,21 @@ The system bottleneck transitioned across optimization stages:
 | **Interactive Plots** | `benchmarks/results/dashboard.html` | Multi-stage comparative Plotly dashboard |
 
 *All percentage deltas are calculated directly from raw benchmark JSON outputs. Profiler counters represent activity during sampled kernel windows on NVIDIA GeForce RTX 5080 Laptop GPU.*
+
+---
+
+## custom-serving
+
+### Stage 1: KV Caching
+
+#### 1. Motivation
+
+#### 2. Experiment Setup
+
+#### 3. Benchmark Results
+
+#### 4. Profiler & Hardware Analysis
+
+#### 5. Conclusion
+
+#### 6. Data Sources and Reproducibility
