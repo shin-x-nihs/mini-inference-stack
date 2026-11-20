@@ -36,7 +36,7 @@ Client benchmarks measure response times and throughput. NVIDIA Nsight Systems (
 ## What I Want to Learn
 
 * **Measure a baseline:** Find out how quickly the model responds and how much output it can generate under different workloads.
-* **Understand generation:** Follow a request from processing the input prompt to generating tokens one by one.
+* **Understand generation:** Follow the steps of a request from processing the input prompt to generating tokens one by one.
 * **Find bottlenecks:** Use profiling tools to understand whether performance is limited by GPU computation, memory access, GPU utilization, or CPU overhead.
 * **Try GPU optimizations:** Explore techniques such as KV caching, tiled attention, operator fusion, and speculative decoding, and measure whether they improve performance.
 * **Compare fairly:** Keep the model, precision, prompts, token lengths, and hardware settings consistent across experiments. Common workload defaults live in `config.yaml` to keep test conditions consistent across runner scripts.
