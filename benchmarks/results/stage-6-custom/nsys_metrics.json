@@ -1,0 +1,31 @@
+{
+  "stage": "stage-6-custom",
+  "workload": {
+    "concurrency": 1,
+    "input_len": 1024,
+    "output_len": 64
+  },
+  "wall_time_ms": 888.5,
+  "num_kernels": 24165,
+  "gpu_active_ms": 808.25,
+  "gpu_active_pct": 90.97,
+  "gpu_idle_ms": 80.25,
+  "gpu_idle_pct": 9.03,
+  "cpu_launch_overhead_ms": 285.25,
+  "cpu_launch_calls": 476,
+  "cuda_graph_launches": 63,
+  "cuda_sync_wait_ms": 7.52,
+  "prefill_duration_ms": 317.09,
+  "prefill_wall_pct": 35.7,
+  "decode_total_ms": 544.1,
+  "decode_step_avg_ms": 8.64,
+  "kernel_time_breakdown": {
+    "linear_ms": 697.22,
+    "linear_pct": 86.3,
+    "attention_ms": 28.18,
+    "attention_pct": 3.5,
+    "norm_act_other_ms": 82.86,
+    "norm_act_other_pct": 10.3
+  },
+  "phase_measurement_source": "NVTX"
+}

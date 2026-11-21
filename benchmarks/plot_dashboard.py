@@ -14,23 +14,25 @@ TEXT_MAIN = "#ffffff"
 TEXT_MUTED = "#a0a0a0"
 
 # --- Track-Aware Progressive Palettes (Dark Theme) ---
-# Custom Track: Semantic optimization heatmap (Crimson -> Orange -> Gold -> Lime -> Emerald -> Cream)
+# Custom Track (S0 -> S6): Monotonic Warm-to-Emerald spectrum (Hue 3° -> 172°)
+# Progresses from Crimson (unoptimized baseline) through Orange/Amber/Yellow/Lime to Emerald & Aqua Mint
 CUSTOM_TRACK_COLORS = [
-    "#ff2a2a",  # Stage 0: Pure Crimson Red
-    "#ff7b00",  # Stage 1: Molten Orange
-    "#ffd60a",  # Stage 2: Solar Gold
-    "#a3e635",  # Stage 3: Electric Lime
-    "#10b981",  # Stage 4: Emerald Green
-    "#fff3b0",  # Stage 5: Warm Cream
+    "#ff3b30",  # Stage 0: Crimson Red (Hue 3°)
+    "#ff7a00",  # Stage 1: Tangerine Orange (Hue 28°)
+    "#ffb703",  # Stage 2: Amber Gold (Hue 43°)
+    "#ffee32",  # Stage 3: Solar Yellow (Hue 55°)
+    "#a3e635",  # Stage 4: Chartreuse Lime (Hue 83°)
+    "#22c55e",  # Stage 5: Emerald Green (Hue 142°)
+    "#2dd4bf",  # Stage 6: Electric Aqua Mint (Hue 172°)
 ]
 
-# vLLM Reference Track: Cool Ice Silver -> Sky Cyan -> Cobalt -> Lavender -> Orchid
+# vLLM Reference Track (S0 -> S4): Cool Blue-to-Orchid spectrum (Hue 213° -> 330°)
 VLLM_TRACK_COLORS = [
-    "#e2e8f0",  # Stage 0: Crisp Ice Silver
-    "#38bdf8",  # Stage 1: Electric Sky Cyan
-    "#3b82f6",  # Stage 2: Cobalt Blue
-    "#a78bfa",  # Stage 3: Soft Lavender Violet
-    "#e879f9",  # Stage 4: Orchid
+    "#60a5fa",  # Stage 0: Bright Azure Blue (Hue 213°)
+    "#a78bfa",  # Stage 1: Lavender Violet (Hue 258°)
+    "#e879f9",  # Stage 2: Electric Orchid Magenta (Hue 292°)
+    "#f472b6",  # Stage 3: Neon Rose Pink (Hue 330°)
+    "#e2e8f0",  # Stage 4: Crisp Ice Silver
 ]
 
 OTHER_TRACK_COLORS = [
@@ -41,7 +43,7 @@ OTHER_TRACK_COLORS = [
 ]
 
 # Concentric marker radii by stage number so overlapping points form a clean bullseye
-STAGE_ROOFLINE_SIZES = [15, 10, 7, 5, 4, 4]
+STAGE_ROOFLINE_SIZES = [15, 11, 8, 6, 5, 4, 4]
 
 
 def extract_int(filename: str) -> int:
@@ -361,7 +363,9 @@ def build_plot3_decode(stages: list[dict], active_track: str) -> tuple[go.Figure
     for s in stages:
         color = s["color"]
         pts = s["context"]
-        is_vis = (active_track == "all") or (s["track"] == active_track)
+        is_vis = ((active_track == "all") or (s["track"] == active_track)) and (
+            s["name"] != "stage-0-custom"
+        )
         fig.add_trace(go.Scatter(
             x=[p["length"] for p in pts],
             y=[p["tpot"] for p in pts],
@@ -374,7 +378,12 @@ def build_plot3_decode(stages: list[dict], active_track: str) -> tuple[go.Figure
             hovertemplate="<b>%{fullData.name}</b><br>Context: %{x} tok<br>Value: %{y:.2f}<extra></extra>",
         ))
 
-    vis_stages = [s for s in stages if active_track == "all" or s["track"] == active_track] or stages
+    vis_stages = [
+        s
+        for s in stages
+        if (active_track == "all" or s["track"] == active_track)
+        and s["name"] != "stage-0-custom"
+    ] or stages
     vis_x = [p["length"] for s in vis_stages for p in s["context"]]
     vis_y = [p["tpot"] for s in vis_stages for p in s["context"]]
     if vis_x:
@@ -582,7 +591,7 @@ def _compact_count(count: int) -> str:
     return str(count)
 
 
-def build_tables_html(stages: list[dict]) -> str:
+def build_tables_html(stages: list[dict], active_track: str = "all") -> str:
     # Stages are already sorted by (track_order, stage_num, name)
     # Table A: Nsight Systems Timeline Overview
     nsys_rows = ""
@@ -594,6 +603,7 @@ def build_tables_html(stages: list[dict]) -> str:
 
         track_divider = "group-start" if (prev_track is not None and s["track"] != prev_track) else ""
         prev_track = s["track"]
+        dot_cls = "stage-dot diamond" if s["symbol"] == "diamond" else "stage-dot"
 
         wall_ms = n.get("wall_time_ms", 0.0)
         num_k = n.get("num_kernels")
@@ -645,7 +655,7 @@ def build_tables_html(stages: list[dict]) -> str:
             kb_cell = "-"
 
         nsys_rows += f"""
-        <tr class="{track_divider}">
+        <tr class="nsys-row {track_divider}" data-stage="{s['name']}" data-track="{s['track']}">
             <td class="stage-cell"><span class="stage-dot" style="background:{s['color']};"></span>{s['name']}</td>
             <td>{_compact_num(wall_ms, 1000.0, 100.0, 1)}{wall_sub}</td>
             <td><span class="highlight-red">{act_pct:.1f}%</span>{act_sub}</td>
@@ -684,6 +694,8 @@ def build_tables_html(stages: list[dict]) -> str:
 
             flat_entries.append({
                 "stage": s["name"],
+                "track": s["track"],
+                "symbol": s["symbol"],
                 "stage_idx": s_idx,
                 "track_order": s["track_order"],
                 "stage_num": s["stage_num"],
@@ -715,10 +727,12 @@ def build_tables_html(stages: list[dict]) -> str:
         prev_group = item["group"]
         phase_badge = f"<span class='badge badge-{item['phase']}'>{item['phase_label']}</span>"
         stage_dot = item["color"]
+        dot_cls = "stage-dot diamond" if item["symbol"] == "diamond" else "stage-dot"
 
         ncu_rows += f"""
         <tr class="ncu-row {group_divider}"
             data-stage="{item['stage']}"
+            data-track="{item['track']}"
             data-phase="{item['phase']}"
             data-group="{item['group']}"
             data-core="{item['is_core']}">
@@ -740,15 +754,40 @@ def build_tables_html(stages: list[dict]) -> str:
         + "".join(f'<option value="{g}">Kernel: {g}</option>' for g in ordered_groups)
     )
     stage_options_html = (
-        '<option value="all" selected>All Stages</option>'
-        + "".join(f'<option value="{s["name"]}">{s["name"]}</option>' for s in stages)
+        '<option value="all" selected>All Track Stages</option>'
+        + "".join(
+            f'<option value="{s["name"]}" data-track="{s["track"]}">{s["name"]}</option>'
+            for s in stages
+        )
+    )
+
+    table_stage_badges_html = " ".join(
+        f'<button type="button" class="stage-pill-tag" data-stage="{s["name"]}" data-track="{s["track"]}" '
+        f'style="--stage-color:{s["color"]};" '
+        f'onclick="onStagePillClick(\'{s["name"]}\')" '
+        f'ondblclick="onStagePillDblClick(\'{s["name"]}\')" '
+        f'title="Click to toggle {s["name"]} across plots &amp; tables (Double-click to isolate)">'
+        f'<span class="stage-dot{" diamond" if s["symbol"] == "diamond" else ""}" style="background:{s["color"]};"></span>'
+        f'{s["name"]}</button>'
+        for s in stages
     )
 
     return f"""
+    <div class="tables-controls-bar">
+        <div class="meta">Stages (Track-Ordered): {table_stage_badges_html}</div>
+        <div class="global-track-bar">
+            <span class="track-bar-label">Tables Track View:</span>
+            <div class="track-pill-group" id="table-track-pills">
+                <button class="track-pill{' active' if active_track == 'custom' else ''}" data-track="custom" onclick="setGlobalTrack('custom')">● Custom Track</button>
+                <button class="track-pill{' active' if active_track == 'vllm' else ''}" data-track="vllm" onclick="setGlobalTrack('vllm')">◆ vLLM Reference</button>
+                <button class="track-pill{' active' if active_track == 'all' else ''}" data-track="all" onclick="setGlobalTrack('all')">●◆ Both Tracks</button>
+            </div>
+        </div>
+    </div>
     <div class="tables-container">
         <div class="card table-card">
             <h2>Table A: Timeline Overview (Nsight Systems)</h2>
-            <table>
+            <table id="nsys-table">
                 <thead>
                     <tr>
                         <th>Stage</th>
@@ -822,10 +861,16 @@ def generate_dashboard(stages: list[dict], output_path: Path):
     p2_html = f2.to_html(full_html=False, include_plotlyjs=False, config=cfg, div_id="plot2-prefill")
     p3_html = f3.to_html(full_html=False, include_plotlyjs=False, config=cfg, div_id="plot3-decode")
     p4_html = f4.to_html(full_html=False, include_plotlyjs=False, config=cfg, div_id="roofline-plot")
-    tables_html = build_tables_html(stages)
+    tables_html = build_tables_html(stages, active_track)
 
     stage_badges_html = " ".join(
-        f'<span class="stage-pill-tag"><span class="stage-dot" style="background:{s["color"]};"></span>{s["name"]}</span>'
+        f'<button type="button" class="stage-pill-tag" data-stage="{s["name"]}" data-track="{s["track"]}" '
+        f'style="--stage-color:{s["color"]};" '
+        f'onclick="onStagePillClick(\'{s["name"]}\')" '
+        f'ondblclick="onStagePillDblClick(\'{s["name"]}\')" '
+        f'title="Click to toggle {s["name"]} across plots &amp; tables (Double-click to isolate)">'
+        f'<span class="stage-dot{" diamond" if s["symbol"] == "diamond" else ""}" style="background:{s["color"]};"></span>'
+        f'{s["name"]}</button>'
         for s in stages
     )
 
@@ -876,7 +921,7 @@ def generate_dashboard(stages: list[dict], output_path: Path):
             font-weight: 700;
             letter-spacing: -0.02em;
         }}
-        header .meta {{
+        .meta {{
             font-family: "JetBrains Mono", Consolas, monospace;
             font-size: 12px;
             color: {TEXT_MUTED};
@@ -885,16 +930,51 @@ def generate_dashboard(stages: list[dict], output_path: Path):
             flex-wrap: wrap;
             gap: 6px;
         }}
+        .tables-controls-bar {{
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 12px;
+            margin-top: 26px;
+            margin-bottom: 16px;
+        }}
         .stage-pill-tag {{
             display: inline-flex;
             align-items: center;
             background: #161616;
-            border: 1px solid #2a2a2a;
+            border: 1px solid #2f2f2f;
             border-radius: 4px;
-            padding: 2px 8px;
-            color: #e5e5e5;
+            padding: 3px 9px;
+            color: #f0f0f0;
+            font-family: "JetBrains Mono", Consolas, monospace;
             font-size: 11.5px;
             font-weight: 600;
+            cursor: pointer;
+            user-select: none;
+            transition: all 0.14s ease;
+        }}
+        .stage-pill-tag:hover {{
+            background: #222222;
+            border-color: var(--stage-color, #ff3b30);
+            color: #ffffff;
+            transform: translateY(-1px);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+        }}
+        .stage-pill-tag.inactive {{
+            opacity: 0.35;
+            background: #0e0e0e;
+            border-color: #222222;
+            color: #777777;
+        }}
+        .stage-pill-tag.inactive:hover {{
+            opacity: 0.7;
+            border-color: var(--stage-color, #555555);
+        }}
+        .stage-dot.diamond {{
+            border-radius: 1.5px;
+            transform: rotate(45deg);
+            width: 7.5px;
+            height: 7.5px;
         }}
         .global-track-bar {{
             display: flex;
@@ -1169,6 +1249,15 @@ def generate_dashboard(stages: list[dict], output_path: Path):
         let currentGlobalTrack = '{active_track}';
         let currentRooflinePhase = 'all';
         let currentNcuPhase = 'all';
+        let plot3Stage0Enabled = false;
+        const stageVisState = {{}};
+        STAGES_CLIENT_DATA.forEach(s => {{
+            stageVisState[s.name] = (currentGlobalTrack === 'all' || s.track === currentGlobalTrack);
+        }});
+        let preDblClickVis = null;
+        let lastPillClickTime = 0;
+        let lastPillClickStage = null;
+        let applyingGlobalStageVis = false;
 
         const PLOT1_LABELS = {{
             'p99_itl': 'ITL P99 (ms)',
@@ -1261,46 +1350,153 @@ def generate_dashboard(stages: list[dict], output_path: Path):
             Plotly.restyle(plotDiv, {{ y: yArrays }}).then(() => rescalePlot3Axes());
         }}
 
-        function setGlobalTrack(track) {{
-            currentGlobalTrack = track;
-            document.querySelectorAll('#global-track-pills .track-pill').forEach(btn => {{
-                btn.classList.toggle('active', btn.getAttribute('data-track') === track);
+        function syncTopStagePills() {{
+            document.querySelectorAll('.stage-pill-tag[data-stage]').forEach(btn => {{
+                const st = btn.getAttribute('data-stage');
+                const isVis = !!stageVisState[st];
+                btn.classList.toggle('inactive', !isVis);
+                btn.setAttribute('aria-pressed', isVis ? 'true' : 'false');
             }});
+        }}
 
-            const visFlags = STAGES_CLIENT_DATA.map(s =>
-                (track === 'all' || s.track === track) ? true : 'legendonly'
+        function syncTopPillsFromPlot(plotDiv) {{
+            if (!plotDiv || !plotDiv.data) return;
+            const isPlot3 = (plotDiv.id === 'plot3-decode');
+            plotDiv.data.forEach(trace => {{
+                const st = trace.meta && trace.meta.stage ? trace.meta.stage : trace.name;
+                if (!st || !(st in stageVisState)) return;
+                const traceVis = (trace.visible === true || trace.visible === undefined);
+                if (isPlot3 && st === 'stage-0-custom') {{
+                    plot3Stage0Enabled = traceVis;
+                    if (traceVis) stageVisState[st] = true;
+                }} else {{
+                    stageVisState[st] = traceVis;
+                }}
+            }});
+            syncTopStagePills();
+            filterNsysTable();
+            filterNcuTable();
+        }}
+
+        function applyStageVisibilityToPlots() {{
+            applyingGlobalStageVis = true;
+            syncTopStagePills();
+            filterNsysTable();
+            filterNcuTable();
+
+            const visFlags12 = STAGES_CLIENT_DATA.map(s =>
+                stageVisState[s.name] ? true : 'legendonly'
+            );
+            const visFlags3 = STAGES_CLIENT_DATA.map(s =>
+                (stageVisState[s.name] && (s.name !== 'stage-0-custom' || plot3Stage0Enabled))
+                    ? true
+                    : 'legendonly'
             );
 
-            ['plot1-pareto', 'plot2-prefill', 'plot3-decode'].forEach(id => {{
+            ['plot1-pareto', 'plot2-prefill'].forEach(id => {{
                 const div = document.getElementById(id);
-                if (div) Plotly.restyle(div, {{ visible: visFlags }});
+                if (div) Plotly.restyle(div, {{ visible: visFlags12 }});
             }});
+            const p3Div = document.getElementById('plot3-decode');
+            if (p3Div) Plotly.restyle(p3Div, {{ visible: visFlags3 }});
 
             rescalePlot1Axes();
             rescalePlot2Axes();
             rescalePlot3Axes();
 
-            // Sync Plot 4 Roofline stage dropdown options & trace visibility
-            const stageSelect = document.getElementById('roofline-stage-select');
-            if (stageSelect) {{
-                stageSelect.value = 'all';
-                Array.from(stageSelect.options).forEach(opt => {{
-                    const optTrack = opt.getAttribute('data-track');
-                    if (!optTrack) return;
-                    opt.style.display = (track === 'all' || optTrack === track) ? '' : 'none';
-                }});
-            }}
-
             const roofDiv = document.getElementById('roofline-plot');
             if (roofDiv && ROOFLINE_STAGE_DATA.length) {{
                 const roofVis = ROOFLINE_STAGE_DATA.map(sObj =>
-                    (track === 'all' || sObj.track === track) ? true : 'legendonly'
+                    stageVisState[sObj.stage] ? true : 'legendonly'
                 );
                 const traceIndices = ROOFLINE_STAGE_DATA.map((_, idx) => idx + 1);
                 Plotly.restyle(roofDiv, {{ visible: roofVis }}, traceIndices).then(() => {{
-                    filterRooflinePlot();
+                    return filterRooflinePlot();
+                }}).finally(() => {{
+                    setTimeout(() => {{ applyingGlobalStageVis = false; }}, 40);
                 }});
+            }} else {{
+                setTimeout(() => {{ applyingGlobalStageVis = false; }}, 40);
             }}
+        }}
+
+        function onStagePillClick(stageName) {{
+            const now = performance.now();
+            if (now - lastPillClickTime > 320 || lastPillClickStage !== stageName) {{
+                preDblClickVis = Object.assign({{}}, stageVisState);
+            }}
+            lastPillClickTime = now;
+            lastPillClickStage = stageName;
+
+            stageVisState[stageName] = !stageVisState[stageName];
+            if (stageName === 'stage-0-custom' && !stageVisState[stageName]) {{
+                plot3Stage0Enabled = false;
+            }}
+            applyStageVisibilityToPlots();
+        }}
+
+        function onStagePillDblClick(stageName) {{
+            const baseVis = preDblClickVis || stageVisState;
+            const visibleStages = STAGES_CLIENT_DATA.filter(s => !!baseVis[s.name]).map(s => s.name);
+            const alreadyIsolated = (visibleStages.length === 1 && visibleStages[0] === stageName);
+
+            STAGES_CLIENT_DATA.forEach(s => {{
+                if (alreadyIsolated) {{
+                    stageVisState[s.name] = (currentGlobalTrack === 'all' || s.track === currentGlobalTrack);
+                }} else {{
+                    stageVisState[s.name] = (s.name === stageName);
+                }}
+            }});
+            if (stageName === 'stage-0-custom') {{
+                plot3Stage0Enabled = !alreadyIsolated;
+            }}
+            preDblClickVis = Object.assign({{}}, stageVisState);
+            applyStageVisibilityToPlots();
+        }}
+
+        function setGlobalTrack(track) {{
+            currentGlobalTrack = track;
+            plot3Stage0Enabled = false;
+            document.querySelectorAll('#global-track-pills .track-pill, #table-track-pills .track-pill').forEach(btn => {{
+                btn.classList.toggle('active', btn.getAttribute('data-track') === track);
+            }});
+
+            STAGES_CLIENT_DATA.forEach(s => {{
+                stageVisState[s.name] = (track === 'all' || s.track === track);
+            }});
+
+            // Sync Plot 4 Roofline & Table B stage dropdown options
+            ['roofline-stage-select', 'ncu-stage-select'].forEach(selId => {{
+                const stageSelect = document.getElementById(selId);
+                if (stageSelect) {{
+                    stageSelect.value = 'all';
+                    Array.from(stageSelect.options).forEach(opt => {{
+                        const optTrack = opt.getAttribute('data-track');
+                        if (!optTrack) return;
+                        opt.style.display = (track === 'all' || optTrack === track) ? '' : 'none';
+                    }});
+                }}
+            }});
+
+            applyStageVisibilityToPlots();
+        }}
+
+        function filterNsysTable() {{
+            const rows = document.querySelectorAll('#nsys-table tbody tr.nsys-row');
+            let prevVisibleTrack = null;
+            rows.forEach(row => {{
+                const rStage = row.getAttribute('data-stage');
+                const rTrack = row.getAttribute('data-track');
+                const isVis = !!stageVisState[rStage];
+                if (isVis) {{
+                    row.style.display = '';
+                    row.classList.toggle('group-start', prevVisibleTrack !== null && prevVisibleTrack !== rTrack);
+                    prevVisibleTrack = rTrack;
+                }} else {{
+                    row.style.display = 'none';
+                    row.classList.remove('group-start');
+                }}
+            }});
         }}
 
         function setRooflinePhase(phase) {{
@@ -1460,7 +1656,8 @@ def generate_dashboard(stages: list[dict], output_path: Path):
                 const rCore = row.getAttribute('data-core') === 'true';
 
                 const matchPhase = (currentNcuPhase === 'all') || (rPhase === currentNcuPhase);
-                const matchStage = (stageMode === 'all') || (rStage === stageMode);
+                const matchTablePill = !!stageVisState[rStage];
+                const matchStage = (stageMode === 'all') ? matchTablePill : (rStage === stageMode);
                 let matchKernel = true;
                 if (kernelMode === 'core') {{
                     matchKernel = rCore;
@@ -1480,7 +1677,6 @@ def generate_dashboard(stages: list[dict], output_path: Path):
         }}
 
         document.addEventListener('DOMContentLoaded', () => {{
-            filterNcuTable();
             setGlobalTrack(currentGlobalTrack);
 
             // Re-scale axes or re-filter Roofline labels whenever user clicks a stage in a Plotly legend
@@ -1489,16 +1685,32 @@ def generate_dashboard(stages: list[dict], output_path: Path):
             const p3 = document.getElementById('plot3-decode');
             const p4 = document.getElementById('roofline-plot');
 
-            if (p1 && p1.on) p1.on('plotly_restyle', () => setTimeout(rescalePlot1Axes, 20));
-            if (p2 && p2.on) p2.on('plotly_restyle', () => setTimeout(rescalePlot2Axes, 20));
-            if (p3 && p3.on) p3.on('plotly_restyle', () => setTimeout(rescalePlot3Axes, 20));
+            if (p1 && p1.on) p1.on('plotly_restyle', (evtData) => {{
+                setTimeout(() => {{
+                    rescalePlot1Axes();
+                    if (!applyingGlobalStageVis && evtData && evtData[0] && ('visible' in evtData[0])) syncTopPillsFromPlot(p1);
+                }}, 20);
+            }});
+            if (p2 && p2.on) p2.on('plotly_restyle', (evtData) => {{
+                setTimeout(() => {{
+                    rescalePlot2Axes();
+                    if (!applyingGlobalStageVis && evtData && evtData[0] && ('visible' in evtData[0])) syncTopPillsFromPlot(p2);
+                }}, 20);
+            }});
+            if (p3 && p3.on) p3.on('plotly_restyle', (evtData) => {{
+                setTimeout(() => {{
+                    rescalePlot3Axes();
+                    if (!applyingGlobalStageVis && evtData && evtData[0] && ('visible' in evtData[0])) syncTopPillsFromPlot(p3);
+                }}, 20);
+            }});
             if (p4 && p4.on) {{
                 let filteringRoof = false;
                 p4.on('plotly_restyle', (evtData) => {{
-                    if (filteringRoof) return;
+                    if (filteringRoof || applyingGlobalStageVis) return;
                     if (evtData && evtData[0] && ('visible' in evtData[0])) {{
                         filteringRoof = true;
                         setTimeout(() => {{
+                            syncTopPillsFromPlot(p4);
                             Promise.resolve(filterRooflinePlot()).finally(() => {{
                                 filteringRoof = false;
                             }});

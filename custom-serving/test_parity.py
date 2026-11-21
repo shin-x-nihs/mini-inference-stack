@@ -603,6 +603,21 @@ def run_parity(
                     device=device,
                 )
 
+            if hasattr(engine, "graph_runner"):
+                engine.warmup()
+                assert engine.graph_runner.is_captured, (
+                    f"[{stage_name}] Expected DecodeGraphRunner.is_captured=True after warmup()"
+                )
+                assert engine.allocator.num_free_blocks == engine.allocator.num_blocks, (
+                    f"[{stage_name}] Expected all {engine.allocator.num_blocks} blocks free after "
+                    f"warmup(), got {engine.allocator.num_free_blocks}"
+                )
+                print(
+                    f"[{stage_name}] Warmup + CUDA graph capture verified "
+                    f"(buckets={engine.graph_runner.buckets}, "
+                    f"{engine.allocator.num_free_blocks}/{engine.allocator.num_blocks} blocks free)"
+                )
+
             if is_paged_stage:
                 allocator = engine.allocator
                 assert allocator.num_free_blocks == allocator.num_blocks, (
@@ -746,55 +761,74 @@ def run_parity(
             if is_paged_stage:
                 batch_prompt_ids = [prompt_ids, *extra_prompt_ids_list]
                 batch_hf_refs = [hf_ids, *extra_hf_ids]
-                prompt_lens = [len(p) for p in batch_prompt_ids]
-                print(
-                    f"[{stage_name}] Verifying concurrent B={len(batch_prompt_ids)} "
-                    f"heterogeneous-length batched parity (prompt lengths={prompt_lens})..."
-                )
+                batch_cases: list[tuple[str, list[list[int]], list[list[int]]]] = [
+                    ("", batch_prompt_ids, batch_hf_refs)
+                ]
+                if hasattr(engine, "graph_runner") and len(batch_prompt_ids) >= 3:
+                    bucket_for_3 = engine.graph_runner.select_bucket(3)
+                    assert bucket_for_3 == 4, (
+                        f"[{stage_name}] Expected select_bucket(3) == 4, got {bucket_for_3}"
+                    )
+                    batch_cases.append(
+                        (
+                            f" (padded into bucket B={bucket_for_3})",
+                            batch_prompt_ids[:3],
+                            batch_hf_refs[:3],
+                        )
+                    )
 
-                async def _run_batched_async() -> list[list[int]]:
-                    async def _gather_all() -> list[list[int]]:
-                        return list(
-                            await asyncio.gather(
-                                *(
-                                    engine.generate_tokens_async(
-                                        p_ids,
-                                        max_tokens=num_tokens,
-                                        temperature=0.0,
-                                        ignore_eos=True,
+                for case_label, case_prompts, case_refs in batch_cases:
+                    prompt_lens = [len(p) for p in case_prompts]
+                    print(
+                        f"[{stage_name}] Verifying concurrent B={len(case_prompts)}{case_label} "
+                        f"heterogeneous-length batched parity (prompt lengths={prompt_lens})..."
+                    )
+
+                    async def _run_batched_async(
+                        prompts_to_run: list[list[int]] = case_prompts,
+                    ) -> list[list[int]]:
+                        async def _gather_all() -> list[list[int]]:
+                            return list(
+                                await asyncio.gather(
+                                    *(
+                                        engine.generate_tokens_async(
+                                            p_ids,
+                                            max_tokens=num_tokens,
+                                            temperature=0.0,
+                                            ignore_eos=True,
+                                        )
+                                        for p_ids in prompts_to_run
                                     )
-                                    for p_ids in batch_prompt_ids
                                 )
                             )
-                        )
 
-                    return await _run_with_scheduler(engine, _gather_all())  # type: ignore[return-value]
+                        return await _run_with_scheduler(engine, _gather_all())  # type: ignore[return-value]
 
-                batched_outputs = asyncio.run(_run_batched_async())
-                assert engine.allocator.num_free_blocks == engine.allocator.num_blocks, (
-                    f"[{stage_name}] Expected all {engine.allocator.num_blocks} blocks free "
-                    f"after B={len(batch_prompt_ids)} batched generation, got "
-                    f"{engine.allocator.num_free_blocks}"
-                )
-                for req_idx, (b_ids, ref_ids, p_len) in enumerate(
-                    zip(batched_outputs, batch_hf_refs, prompt_lens)
-                ):
-                    assert len(b_ids) == num_tokens, (
-                        f"[{stage_name}] Request {req_idx} (len={p_len}) expected "
-                        f"{num_tokens} tokens, got {len(b_ids)}"
+                    batched_outputs = asyncio.run(_run_batched_async())
+                    assert engine.allocator.num_free_blocks == engine.allocator.num_blocks, (
+                        f"[{stage_name}] Expected all {engine.allocator.num_blocks} blocks free "
+                        f"after B={len(case_prompts)} batched generation, got "
+                        f"{engine.allocator.num_free_blocks}"
                     )
-                    if b_ids != ref_ids:
-                        raise AssertionError(
-                            f"[{stage_name}] Concurrent B={len(batch_prompt_ids)} parity failed "
-                            f"on request {req_idx} (prompt_len={p_len}): "
-                            f"custom={b_ids} != hf={ref_ids}"
+                    for req_idx, (b_ids, ref_ids, p_len) in enumerate(
+                        zip(batched_outputs, case_refs, prompt_lens)
+                    ):
+                        assert len(b_ids) == num_tokens, (
+                            f"[{stage_name}] Request {req_idx} (len={p_len}) expected "
+                            f"{num_tokens} tokens, got {len(b_ids)}"
                         )
-                print(
-                    f"[{stage_name}] PASS: Concurrent B={len(batch_prompt_ids)} heterogeneous "
-                    f"batched parity (32/32 greedy tokens x {len(batch_prompt_ids)} requests) "
-                    f"and 100% block reclamation ({engine.allocator.num_free_blocks}/"
-                    f"{engine.allocator.num_blocks} free) verified!"
-                )
+                        if b_ids != ref_ids:
+                            raise AssertionError(
+                                f"[{stage_name}] Concurrent B={len(case_prompts)} parity failed "
+                                f"on request {req_idx} (prompt_len={p_len}): "
+                                f"custom={b_ids} != hf={ref_ids}"
+                            )
+                    print(
+                        f"[{stage_name}] PASS: Concurrent B={len(case_prompts)}{case_label} heterogeneous "
+                        f"batched parity (32/32 greedy tokens x {len(case_prompts)} requests) "
+                        f"and 100% block reclamation ({engine.allocator.num_free_blocks}/"
+                        f"{engine.allocator.num_blocks} free) verified!"
+                    )
         finally:
             if engine is not None:
                 del engine
@@ -815,7 +849,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default="all",
         help="Stage directory name under custom-serving/ (e.g. stage-0-baseline, "
         "stage-1-kv-cache, stage-2-tiled-attn, stage-3-split-k, stage-4-paged-kv, "
-        "stage-5-fused-ops) or 'all' (default: all).",
+        "stage-5-fused-ops, stage-6-cuda-graphs) or 'all' (default: all).",
     )
     parser.add_argument(
         "--num-tokens",

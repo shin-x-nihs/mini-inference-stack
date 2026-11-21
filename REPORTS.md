@@ -761,3 +761,63 @@ Stage 5 delivered the full kernel-fusion payoff predicted at the end of Stage 4:
 * `benchmarks/results/stage-5-custom/nsys_metrics.json`
 * `benchmarks/results/stage-5-custom/ncu_metrics.json`
 * `benchmarks/results/dashboard.html`
+
+---
+
+### Stage 6 (Custom): Bucketed CUDA Graphs for Decode (`stage-6-custom`)
+
+*Server directory: `custom-serving/stage-6-cuda-graphs/` | Benchmark stage: `stage-6-custom`*
+
+#### 1. Motivation, Hypothesis, and Speedup Model
+* **Motivation (Stage 5 Bottleneck):** Stage 5 fused RMSNorm+residual, in-place RoPE, and `gate_up_proj`+SwiGLU, cutting CUDA kernels from `72,933` to `24,101` on `1024-in / 64-out` (`C=1`). However, `cuda_graph_launches` was still `0`: eager Python/Triton/cuBLAS dispatch executed `24,100` separate host launch calls (`~376` launches per decode step), burning **`364.68 ms` of `cpu_launch_overhead_ms`**, leaving the GPU idle **`28.97%` (`312.19 ms`)** of wall time, and keeping `decode_step_avg_ms` at `12.58 ms` vs. `stage-0-vllm`'s `10.67 ms` (`63` CUDA graph launches).
+* **Hypothesis & Speedup Model:** Capturing the fixed-shape decode forward pass (`q_len == 1`) into static `torch.cuda.CUDAGraph` batch buckets $B \in \{1, 2, 4, 8, 16, 32, 64\}$ replaces ~376 per-step Python kernel launches with a single `cudaGraphLaunch` call (`63` graph launches across 63 decode steps), eliminating decode host-dispatch gaps (`gpu_idle_pct` $\to < 10\%$) and pushing decode step latency below `stage-0-vllm`.
+
+#### 2. Experiment Setup
+* **Hardware & Model:** NVIDIA GeForce RTX 5080 Laptop GPU (`896.0 GB/s` DRAM ceiling, `40.0 TFLOP/s` BF16 Tensor Core ceiling), `Qwen/Qwen2.5-Coder-1.5B-Instruct` in `bfloat16`, `max_model_len = 9216`, `KV_BLOCK_SIZE = 16`, `num_blocks = 4096`, `max_batch_size = 64`.
+* **Architecture Changes (`custom-serving/stage-6-cuda-graphs/`):**
+  1. **Capture-Safe & Padded-Lane Safe Forward (`model.py`):** Eliminates host-device syncs (`.item()`) when `max_context_len` is passed as a static `int` (`max_model_len`). Clamps `positions = (start_pos[:, None] + ...).clamp(min=0)` so padded bucket rows (`context_lengths[pad] == 0`) read RoPE row `0`, skip KV writes in `_reshape_and_cache` (`pos == -1` $\Rightarrow$ `valid_blk == False`, preserving physical block `0`), and emit finite zero outputs in `_flash_attention_splitk_combine`.
+  2. **Bucketed `DecodeGraphRunner` (`model.py`, `engine.py`):** Pre-allocates static device buffers (`input_ids [B, 1]`, `block_table [B, 576]`, `context_lengths [B]`) for each bucket $B \in (1, 2, 4, 8, 16, 32, 64) \le \text{max\_batch\_size}$. During `PagedEngine.warmup()`, JIT-compiles both `SINGLE_SPLIT=False` ($B < 10$) and `SINGLE_SPLIT=True` ($B \ge 10$) Triton specializations, runs 2 warmup passes on a dedicated capture stream, captures each bucket into a `torch.cuda.CUDAGraph`, and reclaims temporary warmup blocks (`num_free_blocks == num_blocks`). At runtime, `_run_decode_batch` copies active rows `0..actual_batch_size-1`, zero-fills padded lanes `actual_batch_size..B-1`, calls `graph.replay()`, and slices `static_logits[:actual_batch_size]`.
+* **Workloads & Parity:** `test_parity.py --stage all` (`32/32` greedy token parity across all 7 stages, `B=4` exact-bucket and `B=3 -> bucket B=4` padded-lane parity, `256/256` block reclamation); closed-loop Pareto (`pareto_c{1..64}.json`, `512`-in / `128`-out) and Context (`context_l{128..8192}.json`, `C=1`, `64`-out) sweeps; `nsys` (`1024`-in / `64`-out, `C=1`) and standalone Layer 0 `ncu` (`L=2048` Prefill / `M=1` Decode).
+
+#### 3. Benchmark Results (`stage-5-custom` & `stage-0-vllm` vs. `stage-6-custom`)
+
+| Sweep Point | `stage-5-custom` | `stage-6-custom` | `stage-0-vllm` (Ref) | Stage 6 vs. Stage 5 (`% of vLLM`) |
+| :--- | :--- | :--- | :--- | :--- |
+| **Pareto C=1** | 68.44 tok/s (TPOT 14.19 ms, TTFT 67.15 ms) | **113.42 tok/s** (TPOT 8.43 ms, TTFT 57.78 ms) | 87.77 tok/s (TPOT 10.90 ms) | **+65.7%**, TPOT -40.6% (**129.2% of vLLM**) |
+| **Pareto C=2** | 133.29 tok/s (TPOT 14.34 ms, TTFT 98.76 ms) | **230.95 tok/s** (TPOT 8.02 ms, TTFT 89.01 ms) | 169.46 tok/s (TPOT 10.98 ms) | **+73.3%**, TPOT -44.1% (**136.3% of vLLM**) |
+| **Pareto C=4** | 233.36 tok/s (TPOT 15.84 ms, TTFT 181.85 ms) | **403.44 tok/s** (TPOT 8.85 ms, TTFT 144.04 ms) | 353.74 tok/s (TPOT 10.15 ms) | **+72.9%**, TPOT -44.1% (**114.1% of vLLM**) |
+| **Pareto C=8** | 469.40 tok/s (TPOT 14.62 ms, TTFT 323.51 ms) | **741.79 tok/s** (TPOT 8.92 ms, TTFT 246.50 ms) | 561.94 tok/s (TPOT 12.27 ms) | **+58.0%**, TPOT -39.0% (**132.0% of vLLM**) |
+| **Pareto C=16** | 748.22 tok/s (TPOT 17.56 ms, TTFT 505.97 ms) | **1,065.51 tok/s** (TPOT 11.99 ms, TTFT 398.55 ms) | 831.19 tok/s (TPOT 16.08 ms) | **+42.4%**, TPOT -31.7% (**128.2% of vLLM**) |
+| **Pareto C=32** | 1,116.76 tok/s (TPOT 22.10 ms, P99 ITL 32.28 ms) | **1,410.49 tok/s** (TPOT 16.79 ms, P99 ITL 18.73 ms) | 966.96 tok/s (TPOT 27.86 ms, P99 ITL 239.19 ms) | **+26.3%**, TPOT -24.0% (**145.9% of vLLM**) |
+| **Pareto C=64** | 1,486.13 tok/s (TPOT 31.71 ms, P99 ITL 39.64 ms) | **1,770.61 tok/s** (TPOT 25.91 ms, P99 ITL 27.57 ms) | 1,232.26 tok/s (TPOT 45.15 ms, P99 ITL 258.96 ms) | **+19.1%**, TPOT -18.3% (**143.7% of vLLM**) |
+| **Context L=128** | 75.31 tok/s (TPOT 12.85 ms, TTFT 39.70 ms) | **125.31 tok/s** (TPOT 7.50 ms, TTFT 37.78 ms) | 89.04 tok/s (TPOT 10.67 ms, TTFT 46.34 ms) | **+66.4%**, TPOT -41.6% (**140.7% of vLLM**) |
+| **Context L=256** | 90.78 tok/s (TPOT 10.45 ms, TTFT 46.15 ms) | **110.71 tok/s** (TPOT 8.39 ms, TTFT 49.40 ms) | 87.17 tok/s (TPOT 10.75 ms, TTFT 56.50 ms) | **+22.0%**, TPOT -19.8% (**127.0% of vLLM**) |
+| **Context L=512** | 78.14 tok/s (TPOT 11.84 ms, TTFT 72.51 ms) | **114.36 tok/s** (TPOT 7.83 ms, TTFT 66.21 ms) | 89.40 tok/s (TPOT 10.09 ms, TTFT 79.55 ms) | **+46.4%**, TPOT -33.9% (**127.9% of vLLM**) |
+| **Context L=1024** | 68.67 tok/s (TPOT 12.74 ms, TTFT 129.08 ms) | **97.46 tok/s** (TPOT 8.60 ms, TTFT 114.26 ms) | 95.23 tok/s (TPOT 8.99 ms, TTFT 105.47 ms) | **+41.9%**, TPOT -32.5% (**102.3% of vLLM**) |
+| **Context L=2048** | 65.85 tok/s (TPOT 12.20 ms, TTFT 202.66 ms) | **91.62 tok/s** (TPOT 8.31 ms, TTFT 174.38 ms) | 75.68 tok/s (TPOT 10.11 ms, TTFT 208.14 ms) | **+39.1%**, TPOT -31.9% (**121.1% of vLLM**) |
+| **Context L=4096** | 49.93 tok/s (TPOT 13.31 ms, TTFT 442.69 ms) | **74.26 tok/s** (TPOT 8.42 ms, TTFT 331.25 ms) | 59.67 tok/s (TPOT 10.41 ms, TTFT 416.47 ms) | **+48.7%**, TPOT -36.8% (**124.5% of vLLM**) |
+| **Context L=8192** | 39.09 tok/s (TPOT 13.10 ms, TTFT 811.84 ms) | **55.46 tok/s** (TPOT 8.32 ms, TTFT 629.30 ms) | 50.95 tok/s (TPOT 9.24 ms, TTFT 673.66 ms) | **+41.9%**, TPOT -36.5% (**108.9% of vLLM**) |
+
+All 14 `stage-6-custom` sweep JSONs completed with `failed: 0`. `stage-6-custom` outperforms `stage-0-vllm` at **every** Pareto concurrency point (`114.1%–145.9%`) and **every** context length `L=128..8192` (`102.3%–140.7%`), holding single-request mean TPOT within **`7.50–8.60 ms/token`** across the entire `8192`-token context window.
+
+#### 4. Profiler & Hardware Analysis
+
+##### Nsight Systems (`1024-in / 64-out`, `C=1`, NVTX-Measured)
+* **CUDA Graph Capture & Host Dispatch Collapse:** `cuda_graph_launches` rose from `0` (`stage-5-custom`) to **`63`** (1 graph replay per decode token, matching `stage-0-vllm`). Host `cpu_launch_calls` collapsed **50.6× (-98.02%)** from `24,100` to **`476`** (only the eager prefill launches plus 63 graph replays), and total `cpu_launch_overhead_ms` dropped **-21.78%** from `364.68 ms` to **`285.25 ms`** (virtually all remaining launch API time is the single eager prefill pass).
+* **GPU Idle Collapse & Decode Speedup:** `gpu_idle_pct` fell **3.21×** from `28.97%` (`312.19 ms`) to **`9.03%` (`80.25 ms`)** (**-74.29% idle ms**, surpassing `stage-0-vllm`'s `11.61%` / `100.68 ms`), lifting `gpu_active_pct` from `71.03%` (`765.34 ms`) to **`90.97%` (`808.25 ms`)**. Total decode time (`decode_total_ms`) dropped **-31.34%** from `792.51 ms` to **`544.10 ms`**, cutting `decode_step_avg_ms` from `12.58 ms` to **`8.64 ms`** (**1.46× faster** than Stage 5 and **19.0% faster** than `stage-0-vllm`'s `10.67 ms/step`). Overall `wall_time_ms` fell **-17.54%** (`1,077.53 ms` → **`888.50 ms`**), with `cuda_sync_wait_ms` at `7.52 ms` and `num_kernels` at `24,165` (the same `24,101` model kernels executed inside graph replay plus 64 stream/graph bookend ops).
+* **Kernel Time Breakdown:** Across `808.25 ms` of active GPU execution, `linear_ms` accounts for **`697.22 ms` (`86.3%`)**, `attention_ms` for **`28.18 ms` (`3.5%`)**, and `norm_act_other_ms` for **`82.86 ms` (`10.3%`)**.
+
+##### Nsight Compute (Layer 0, `L=2048` Prefill & `M=1` Decode)
+Because CUDA Graphs eliminate inter-kernel host launch gaps without altering individual kernel code (`profile_ncu.sh` profiles standalone Layer 0 execution), all 13 Layer 0 kernels match Stage 5's Roofline coordinates with `0` register spills:
+* **Prefill (`L=2048`):** `Prefill Linear GEMM` (`4,146.24 µs`, AI `961.442`, `27.209 TFLOP/s` = `68.02%` of `40.0 TFLOP/s` ceiling / `95.25%` SM SOL, `28.30 GB/s` = `3.16%` ceiling / `6.25%` DRAM SOL); `Prefill Attention` (`_flash_attention_fwd`, `852.99 µs`, AI `1607.900`, `15.891 TFLOP/s` = `39.73%` ceiling / `55.97%` SM SOL, `9.88 GB/s` = `1.10%` ceiling / `2.18%` DRAM SOL); `Prefill SwiGLU` (`_swiglu_fwd`, `242.72 µs`, `368.41 GB/s` = `41.12%` of `896.0 GB/s` ceiling / `81.32%` DRAM SOL); `Prefill Fused RMSNorm` (`53.34 µs`, `236.15 GB/s` = `26.36%` ceiling / `52.14%` DRAM SOL); `Prefill RoPE` (`64.29 µs`, `130.56 GB/s` = `14.57%` ceiling / `28.84%` DRAM SOL); `Prefill KV Cache Write` (`14.08 µs`, `149.29 GB/s` = `16.66%` ceiling / `33.02%` DRAM SOL).
+* **Decode (`M=1`):** `Decode Linear GEMV` (`176.86 µs`, AI `1.005`, `321.39 GB/s` = `35.87%` of `896.0 GB/s` ceiling / `70.94%` DRAM SOL, `0.323 TFLOP/s` = `0.81%` ceiling / `41.42%` SM SOL); `Decode Attention (Triton Split-K)` (`33.98 µs`, `62.58 GB/s` = `6.98%` ceiling / `13.86%` DRAM SOL) + `Combine` (`7.74 µs`, `13.55 GB/s`); `Decode Fused RMSNorm` (`6.88 µs`), `Decode RoPE` (`5.89 µs`), `Decode KV Cache Write` (`5.47 µs`), and `Decode SwiGLU` (`4.93 µs`).
+
+#### 5. Conclusion
+Stage 6 closed the final host-dispatch gap in the custom track: bucketed `DecodeGraphRunner` capture ($B \in \{1..64\}$) converted 63 decode steps from `~23,600` individual Python kernel launches into **`63` `cudaGraphLaunch` calls** (`cpu_launch_calls`: `24,100` → `476`, `-98.02%`; `cpu_launch_overhead_ms`: `364.68 ms` → `285.25 ms`, `-21.78%`), collapsing GPU idle time from `28.97%` to **`9.03%`** (`90.97%` active) and cutting `decode_step_avg_ms` to **`8.64 ms`** (`19.0%` faster than `stage-0-vllm`'s `10.67 ms`). As a result, `stage-6-custom` exceeds `stage-0-vllm` across the entire benchmark suite—reaching **`113.42 tok/s` (`8.43 ms` TPOT) at `C=1`** (`129.2%` of vLLM), **`1,770.61 tok/s` at `C=64`** (`143.7%` of vLLM with `9.39×` lower P99 ITL), and **`7.50–8.60 ms` TPOT** across `L=128..8192`.
+
+#### 6. Data Sources and Reproducibility
+* `benchmarks/results/stage-6-custom/pareto_c{1,2,4,8,16,32,64}.json`
+* `benchmarks/results/stage-6-custom/context_l{128,256,512,1024,2048,4096,8192}.json`
+* `benchmarks/results/stage-6-custom/nsys_metrics.json`
+* `benchmarks/results/stage-6-custom/ncu_metrics.json`
+* `benchmarks/results/dashboard.html`
