@@ -449,7 +449,7 @@ Verified 100% greedy token ID parity (`32/32` tokens, prefill max-abs logit diff
 
 ### Stage 2: Tiled Attention / FlashAttention (`stage-2-custom`)
 
-*Server directory: `custom-serving/stage-2-tiled-attn/` (Planned) | Benchmark stage: `stage-2-custom`*
+*Server directory: `custom-serving/stage-2-tiled-attn/` | Benchmark stage: `stage-2-custom`*
 
 #### 1. Motivation
 
@@ -460,3 +460,105 @@ With redundant decode recomputation eliminated by the Stage 1 KV cache, Nsight C
 
 ##### Hypothesis
 Fusing `Q @ K^T`, scaling, causal masking, online softmax, and `probs @ V` into a tiled SRAM kernel (FlashAttention-style) will avoid materializing the $O(S^2)$ intermediate score and probability matrices in GDDR7, restoring high arithmetic intensity during prefill and eliminating the HBM memory wall at long contexts.
+
+##### Expected Results
+* **Prefill Roofline Shift (`ncu`):** Prefill attention Arithmetic Intensity should jump by $>10\times$ (approaching vLLM's $\sim 1,600\text{ FLOP/B}$) while DRAM bandwidth drops below $15\text{ GB/s}$.
+* **Long-Context TTFT (`context_sweep`):** Significant TTFT reduction at $L=1024\text{--}2048$ as $O(S^2)$ HBM reads/writes are eliminated, along with flat $O(S)$ prefill memory scaling at $L=8192$.
+* **Decode Side-Effect (`M = 1`):** Using a single query-tiled FlashAttention kernel for $M=1$ decode launches only $1 \times H_q = 12$ thread blocks across the GPU and pads $M=1$ to a $16 \times 128$ Tensor Core tile, exposing low SM occupancy during decode and motivating Split-K parallel decode in Stage 3.
+
+---
+
+#### 2. Experiment Setup
+
+| Setting | Value |
+| :--- | :--- |
+| **Target model** | `Qwen/Qwen2.5-Coder-1.5B-Instruct` (`bfloat16`) |
+| **Architecture change** | Custom Triton FlashAttention-2 forward kernel (`_flash_attention_fwd`): SRAM online fp32 softmax (`BLOCK_M=64` prefill, `BLOCK_M=16` decode, `BLOCK_N=64`), native GQA indexing (`kv_head_idx = q_head_idx // 6`, no `repeat_interleave`), analytical causal mask, zero-copy output strides |
+| **Serving & concurrency** | FastAPI SSE + global `asyncio.Lock` serialization (`ThreadPoolExecutor(max_workers=1)`); 64-token prefill + 1-token decode startup warmup |
+| **Workloads** | Pareto: `512` in / `128` out (`C = 1..16`); Context: `L = 128..2048` / `64` out (`C = 1`); Profiling: `1024` in / `64` out (`nsys`), `L = 2048` Layer 0 (`ncu`) |
+| **Hardware** | NVIDIA GeForce RTX 5080 Laptop GPU (16 GB GDDR7, `sm_120`), CUDA 13.1, PyTorch 2.13.0+cu130, Triton 3.7.1 |
+
+**Validation:**  
+Verified `32/32` greedy token ID parity across all implemented custom stages (`stage-0-baseline` and `stage-1-kv-cache` vs. HF `eager`, max-abs prefill logit diff `0.062500`; `stage-2-tiled-attn` vs. HF `sdpa`, max-abs prefill logit diff `0.218750`) via `uv run --frozen python custom-serving/test_parity.py --stage all`. At $L=8192$, prefill peak allocated VRAM dropped from `~8.1 GB` (`stage-1-custom`) to **3.667 GB** (`2.907 GB` weights + `0.760 GB` activation/KV delta). All benchmark sweeps completed with `failed: 0`.
+
+---
+
+#### 3. Benchmark Results
+
+##### A. Concurrency Scaling (`Input = 512`, `Output = 128`, `C = 1..16`)
+
+| Concurrency ($C$) | `stage-1-custom` Tput | `stage-2-custom` Tput | Tput $\Delta$ | `stage-1-custom` TPOT | `stage-2-custom` TPOT | TPOT $\Delta$ | `stage-1-custom` Mean TTFT | `stage-2-custom` Mean TTFT | TTFT $\Delta$ | `stage-0-vllm` Tput |
+| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **1** | 37.33 tok/s | 43.97 tok/s | <span style="color:#10b981;">**+17.8%**</span> | 26.42 ms | 22.44 ms | <span style="color:#10b981;">**-15.1%**</span> | 74.02 ms | 61.16 ms | <span style="color:#10b981;">**-17.4%**</span> | 87.77 tok/s |
+| **2** | 37.96 tok/s | 47.73 tok/s | <span style="color:#10b981;">**+25.7%**</span> | 25.98 ms | 20.63 ms | <span style="color:#10b981;">**-20.6%**</span> | 3,235.30 ms | 2,614.54 ms | <span style="color:#10b981;">**-19.2%**</span> | 169.46 tok/s |
+| **4** | 36.42 tok/s | 45.44 tok/s | <span style="color:#10b981;">**+24.8%**</span> | 27.14 ms | 21.70 ms | <span style="color:#10b981;">**-20.0%**</span> | 10,062.36 ms | 8,022.17 ms | <span style="color:#10b981;">**-20.3%**</span> | 353.74 tok/s |
+| **8** | 39.57 tok/s | 44.96 tok/s | <span style="color:#10b981;">**+13.6%**</span> | 24.97 ms | 21.98 ms | <span style="color:#10b981;">**-12.0%**</span> | 21,598.44 ms | 18,944.44 ms | <span style="color:#10b981;">**-12.3%**</span> | 561.94 tok/s |
+| **16** | 37.66 tok/s | 40.52 tok/s | <span style="color:#10b981;">**+7.6%**</span> | 26.27 ms | 24.44 ms | <span style="color:#10b981;">**-7.0%**</span> | 48,607.08 ms | 45,163.05 ms | <span style="color:#10b981;">**-7.1%**</span> | 831.19 tok/s |
+
+##### B. Context Length Scaling (`C = 1`, `Output = 64`)
+
+| Context Length ($L$) | `stage-1-custom` TTFT | `stage-2-custom` TTFT | TTFT $\Delta$ | `stage-0-vllm` TTFT | `stage-1-custom` TPOT | `stage-2-custom` TPOT | TPOT $\Delta$ | `stage-1-custom` Tput | `stage-2-custom` Tput | Tput $\Delta$ |
+| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **128** | 51.19 ms | 46.76 ms | <span style="color:#10b981;">**-8.7%**</span> | 46.34 ms | 22.56 ms | 21.50 ms | <span style="color:#10b981;">**-4.7%**</span> | 43.45 tok/s | 45.65 tok/s | <span style="color:#10b981;">**+5.1%**</span> |
+| **256** | 61.89 ms | 53.76 ms | <span style="color:#10b981;">**-13.1%**</span> | 56.50 ms | 24.27 ms | 20.72 ms | <span style="color:#10b981;">**-14.6%**</span> | 40.21 tok/s | 47.06 tok/s | <span style="color:#10b981;">**+17.0%**</span> |
+| **512** | 77.20 ms | 71.15 ms | <span style="color:#10b981;">**-7.8%**</span> | 79.55 ms | 22.64 ms | 22.22 ms | <span style="color:#10b981;">**-1.9%**</span> | 42.54 tok/s | 43.50 tok/s | <span style="color:#10b981;">**+2.3%**</span> |
+| **1024** | 144.75 ms | 103.65 ms | <span style="color:#10b981;">**-28.4%**</span> | 105.47 ms | 23.38 ms | 23.12 ms | <span style="color:#10b981;">**-1.1%**</span> | 39.55 tok/s | 41.00 tok/s | <span style="color:#10b981;">**+3.7%**</span> |
+| **2048** | 330.14 ms | 196.17 ms | <span style="color:#10b981;">**-40.6% ($1.68\times$)**</span> | 208.14 ms | 24.09 ms | 22.12 ms | <span style="color:#10b981;">**-8.2%**</span> | 34.62 tok/s | 40.23 tok/s | <span style="color:#10b981;">**+16.2%**</span> |
+
+##### C. Key Takeaways from Benchmarks
+1. **Prefill Parity with vLLM ($-40.6\%$ TTFT at $L=2048$):** As prompt length grows, eliminating the $O(S^2)$ HBM attention matrix yields progressively larger TTFT reductions: **-8.7%** at $L=128$, **-28.4%** at $L=1024$ (**144.75 $\to$ 103.65 ms**), and **-40.6%** at $L=2048$ (**330.14 $\to$ 196.17 ms**, a **$1.68\times$ speedup**). Across $L=256\text{--}2048$, `stage-2-custom`'s single-request TTFT matches or edges out `stage-0-vllm` (**196.17 ms vs. 208.14 ms** at $L=2048$).
+2. **Reduced Launch Overhead Lifts Serialized Throughput:** Replacing 7 unfused PyTorch attention/GQA/mask/softmax/transpose ops per layer with a single Triton launch lifts serialized throughput by **+17.8% to +25.7%** at $C=1\text{--}4$ (**37.33 $\to$ 43.97 tok/s** at $C=1$; **37.96 $\to$ 47.73 tok/s** at $C=2$) and trims mean TPOT by **15–21%** (**26.42 $\to$ 22.44 ms** at $C=1$).
+
+---
+
+#### 4. Profiler & Hardware Analysis
+
+##### 1. Nsight Systems Timeline (`C = 1`, `Input = 1024`, `Output = 64`)
+* **12,602 Fewer Kernel Launches (`85,058` $\to$ `72,456`):** Fusing GQA head expansion, `Q @ K^T`, scaling, causal masking, fp32 online softmax, `probs @ V`, and output transpose into `_flash_attention_fwd` eliminates **7 kernel launches per layer** across $64 \times 28 = 1,792$ layer calls (**-14.8%** total launches).
+* **Attention GPU Time Share Cut from 24.2% to 9.3%:** Total GPU time spent in `attention` dropped by **39.9%** (**185.04 ms $\to$ 111.20 ms**), shrinking attention's share of GPU execution from **24.2% to 9.3%** (with `linear` at **71.4%** / **858.09 ms** and `norm_act_other` at **19.3%** / **232.12 ms**).
+
+##### 2. Nsight Compute Layer 0 Roofline (`L = 2048` Prefill + `M = 1` Decode)
+* **`Prefill Attention (Triton FlashAttention)` (`_flash_attention_fwd`, grid `(32, 12, 1)`):**
+  * **Arithmetic Intensity ($11.8\times$ Jump):** Rose from **135.42 FLOP/Byte** (`stage-1-custom` score BMM) to **1,597.84 FLOP/Byte**—reaching **98.0%** of `stage-0-vllm`'s FlashAttention kernel (**1,631.02 FLOP/Byte**).
+  * **DRAM Bandwidth ($-89.1\%$ Traffic Drop):** Fell from **78.98 GB/s** (**17.43%** NCU DRAM in the Stage 1 score BMM alone, plus **375.65 GB/s** / **82.91%** NCU DRAM in the separate `1,012.48 µs` `softmax_warp_forward` kernel) down to **8.62 GB/s** (**0.96%** of the 896 GB/s ceiling; **1.90%** NCU sustained-clock DRAM utilization).
+  * **Compute & Duration:** Completes the entire fused prefill attention pass in **978.05 µs** at **13.78 TFLOP/s** (**34.4%** of the 40 TFLOP/s ceiling; **47.44%** NCU SM compute throughput), compared to `>4,100 µs` across Stage 1's unfused BMM + scale + mask + cast + softmax chain (**$>4.2\times$ Layer 0 prefill attention speedup**).
+* **`Decode Attention (Triton FlashAttention)` (`_flash_attention_fwd`, grid `(1, 12, 1)`) — New Decode Bottleneck:**
+  * During single-token decode ($M = q_{\text{len}} = 1, L_{\text{kv}} = 2049$), reusing the query-tiled `_flash_attention_fwd` kernel takes **129.44 µs** (vs. **32.22 µs** in `stage-1-custom` cuBLAS GEMV and **26.02 µs** in `stage-0-vllm` `FlashDecode/SplitKV`), with NCU reporting `Low Occupancy / Latency` (**8.33%** active warps, **5.56%** SM compute, **3.62%** NCU DRAM / **16.41 GB/s**).
+  * Because the grid is partitioned only across $(\lceil q_{\text{len}} / \text{BLOCK\_M} \rceil, B \cdot H_q) = (1, 12, 1)$, only **12 thread blocks** run across the entire RTX 5080 while each CTA sequentially streams all 33 KV tiles, and padding $M=1$ to `BLOCK_M=16` for `tl.dot` wastes $15/16$ (**93.75%**) of tile rows.
+
+---
+
+#### 5. Conclusion
+
+1. **Prefill Memory Wall Eliminated:** Tiling attention in SRAM with online fp32 softmax boosted Prefill Attention Arithmetic Intensity by **$11.8\times$** (**135.42 $\to$ 1,597.84 FLOP/B**), slashed prefill attention DRAM bandwidth by **89.1%** (**78.98 $\to$ 8.62 GB/s**), cut $L=2048$ TTFT by **40.6%** (**330.14 $\to$ 196.17 ms**, matching vLLM), and reduced $L=8192$ prefill peak VRAM to **3.67 GB**.
+2. **Decode Occupancy Bottleneck Isolated for Stage 3:** While query-tiled FlashAttention excels when $q_{\text{len}}$ is large (`384` thread blocks at $L=2048$), at $q_{\text{len}} = 1$ it launches only **12 thread blocks** (`grid=(1, 12, 1)`), starving the GPU's SMs (**16.41 GB/s** DRAM, **129.44 µs**). Splitting the KV sequence across parallel thread blocks (Split-K / FlashDecode) is required next.
+
+---
+
+#### 6. Data Sources and Reproducibility
+
+| Reported Metric | Source Artifact | Counter / Field |
+| :--- | :--- | :--- |
+| **Throughput, TTFT & TPOT** | `benchmarks/results/stage-2-custom/pareto_c*.json`, `context_l*.json` | `output_throughput`, `mean_ttft_ms`, `mean_tpot_ms` |
+| **Stage 1 Custom Baseline** | `benchmarks/results/stage-1-custom/pareto_c*.json`, `context_l*.json`, `nsys_metrics.json`, `ncu_metrics.json` | Prior stage comparison metrics |
+| **vLLM Reference Baseline** | `benchmarks/results/stage-0-vllm/pareto_c*.json`, `context_l*.json`, `nsys_metrics.json`, `ncu_metrics.json` | Reference ceiling metrics |
+| **Timeline Breakdown** | `benchmarks/results/stage-2-custom/nsys_metrics.json` | `wall_time_ms`, `num_kernels`, `decode_step_avg_ms`, `kernel_time_breakdown` |
+| **Kernel Roofline** | `benchmarks/results/stage-2-custom/ncu_metrics.json` | `execution_time_us`, `achieved_dram_gbps`, `attained_tflops`, `arithmetic_intensity_flop_byte` |
+| **Interactive Plots** | `benchmarks/results/dashboard.html` | Multi-stage comparative Plotly dashboard |
+
+---
+
+### Stage 3: Parallel Decode Attention / Split-K (`stage-3-custom`)
+
+*Server directory: `custom-serving/stage-3-split-k/` (Planned) | Benchmark stage: `stage-3-custom`*
+
+#### 1. Motivation
+
+##### Observation (Stage 2 Tiled Attention: `stage-2-custom` vs. `stage-0-vllm`)
+While Stage 2's query-tiled Triton FlashAttention-2 kernel (`_flash_attention_fwd`) solved prefill ($1,597.84\text{ FLOP/B}$, $8.62\text{ GB/s}$ DRAM, $196.17\text{ ms}$ TTFT at $L=2048$), Nsight Compute Layer 0 profiling exposes severe **SM and memory-bandwidth under-utilization during single-token decode** ($M = q_{\text{len}} = 1, L_{\text{kv}} = 2048$):
+* **SM Starvation (`grid = (1, 12, 1)`):** Partitioning work only along $(\lceil q_{\text{len}} / \text{BLOCK\_M} \rceil, B \cdot H_q)$ launches **384 thread blocks** during prefill ($L=2048, \text{BLOCK\_M}=64$), but collapses to just **12 thread blocks** during decode ($q_{\text{len}}=1$). On the RTX 5080 Laptop GPU, 12 CTAs occupy only a fraction of available SMs (**8.33%** active warps, **5.56%** NCU SM throughput) while each CTA serially loops over all 33 KV cache tiles, taking **129.44 µs** per layer and drawing only **16.41 GB/s** of DRAM bandwidth (**1.8%** of the 896 GB/s physical ceiling; **3.62%** NCU DRAM utilization).
+* **Tensor Core Tile Padding Waste (`BLOCK_M = 16` for $M = 1$):** Because Triton's `tl.dot` requires tile dimensions $\ge 16$, a single decode query vector ($1 \times 128$) must be padded to $16 \times 128$ (or GQA-grouped across 6 query heads, leaving $10/16$ rows unused), wasting **93.75%** of Tensor Core MMA rows on dummy zeros and inflating apparent arithmetic intensity ($\mathbf{99.15\text{ FLOP/B}}$, **1.627 TFLOP/s**).
+* **`stage-0-vllm` Reference (`Decode Attention (FlashDecode/SplitKV)`):** vLLM splits the KV sequence dimension across parallel thread blocks (`grid = (1, 17, 2)` = **34 CTAs** for the main Split-K pass plus a fast **21.63 µs** `splitkv_combine` reduction), driving **82.87 GB/s** of DRAM bandwidth (**18.37%** NCU DRAM, **$5.05\times$ higher bandwidth**) and finishing the main pass in **26.02 µs** (**$4.97\times$ faster** than Stage 2's `129.44 µs`).
+
+##### Hypothesis
+Implementing a dedicated **Split-K / FlashDecode** kernel for decode ($q_{\text{len}} = 1$) that partitions the KV cache sequence length $L_{\text{kv}}$ across $S_k$ parallel thread blocks per head (computing partial online-softmax accumulators $(m_i^{(s)}, l_i^{(s)}, O_i^{(s)})$ in parallel and reducing them via a lightweight log-sum-exp combine kernel) will multiply active CTAs across SMs, eliminate serial KV-loop latency, and significantly increase achieved DRAM bandwidth and decode attention speed at long contexts.

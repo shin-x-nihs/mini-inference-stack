@@ -23,7 +23,7 @@ This project explores how LLM inference works and how GPU optimizations affect i
 
 The codebase is organized into **two parallel folds**:
 * **`vllm-reference/` (Reference Track):** Production-grade vLLM implementations used to establish upper-bound performance targets, latency boundaries, and reference profiler traces. **(Philosophy: Feature Isolation — evaluating one high-level optimization at a time).**
-* **`custom-serving/` (Custom Track):** Progressive, from-scratch inference implementations (currently through `stage-1-kv-cache`) progressing through custom kernels and memory managers, built to demystify GPU performance from first principles. **(Philosophy: Strictly Additive — redoing history by stacking each optimization on top of the last).**
+* **`custom-serving/` (Custom Track):** Progressive, from-scratch inference implementations (currently through `stage-2-tiled-attn`) progressing through custom kernels and memory managers, built to demystify GPU performance from first principles. **(Philosophy: Strictly Additive — redoing history by stacking each optimization on top of the last).**
 
 The goal isn't to build a replacement for vLLM. It's to learn by experimenting: measure the baseline, find out where execution time is spent, implement optimizations one step at a time, and compare the results.
 
@@ -80,7 +80,8 @@ mini-inference-stack/
 │   ├── README.md                   # Custom track architecture notes & file inventory
 │   ├── test_parity.py              # Shared greedy token & prefill logit parity runner
 │   ├── stage-0-baseline/           # Naive PyTorch baseline (Stage 0; no KV cache/SDPA)
-│   └── stage-1-kv-cache/           # Naive PyTorch KV cache engine (Stage 1)
+│   ├── stage-1-kv-cache/           # Naive PyTorch KV cache engine (Stage 1)
+│   └── stage-2-tiled-attn/         # Custom Triton FlashAttention-2 engine (Stage 2)
 └── benchmarks/                     # Benchmark and profiling suite
     ├── bench_closed_loop.sh        # Closed-loop concurrency & context sweeps
     ├── profile_nsys.sh             # Nsight Systems timeline profiling
@@ -151,6 +152,9 @@ In Terminal 1:
 
 # Or Custom Track Stage 1: Naive KV Cache
 ./custom-serving/stage-1-kv-cache/serve.sh
+
+# Or Custom Track Stage 2: Tiled Attention (Triton FlashAttention-2)
+./custom-serving/stage-2-tiled-attn/serve.sh
 ```
 
 ### 2. Run Benchmarks
@@ -165,6 +169,7 @@ In Terminal 2 (while the server is running):
 ./benchmarks/bench_closed_loop.sh stage-2-vllm
 ./benchmarks/bench_closed_loop.sh stage-0-custom
 ./benchmarks/bench_closed_loop.sh stage-1-custom
+./benchmarks/bench_closed_loop.sh stage-2-custom
 ```
 
 ### 3. Profile GPU Execution
@@ -176,6 +181,7 @@ In Terminal 2 (while the server is running):
 ./benchmarks/profile_nsys.sh stage-2-vllm
 ./benchmarks/profile_nsys.sh stage-0-custom
 ./benchmarks/profile_nsys.sh stage-1-custom
+./benchmarks/profile_nsys.sh stage-2-custom
 
 # Kernel profile (runs standalone; stop the server first to avoid GPU memory contention.
 # Stage 0 custom deferred NCU since nsys already isolated full-sequence decode recomputation.)
@@ -183,6 +189,7 @@ In Terminal 2 (while the server is running):
 ./benchmarks/profile_ncu.sh stage-1-vllm
 ./benchmarks/profile_ncu.sh stage-2-vllm
 ./benchmarks/profile_ncu.sh stage-1-custom
+./benchmarks/profile_ncu.sh stage-2-custom
 ```
 
 ### 4. Generate the Dashboard
@@ -192,7 +199,7 @@ In Terminal 2 (while the server is running):
 uv run python benchmarks/plot_dashboard.py
 
 # Compare specific stages
-uv run python benchmarks/plot_dashboard.py --stages stage-0-vllm stage-1-vllm stage-2-vllm stage-0-custom stage-1-custom -o comparison.html
+uv run python benchmarks/plot_dashboard.py --stages stage-0-vllm stage-1-vllm stage-2-vllm stage-0-custom stage-1-custom stage-2-custom -o comparison.html
 ```
 
 ---
@@ -214,8 +221,8 @@ Each stage explores one main question at a time, checks that the implementation 
    Build a strict first-principles forward pass and generation loop (no KV cache, no SDPA, serialized via `asyncio.Lock`) to establish the unoptimized baseline and quantify full-sequence recomputation and launch overhead. See [custom-serving/README.md](custom-serving/README.md).
 5. **Custom Stage 1: KV Caching (`stage-1-custom`)**  
    Cache per-layer Key and Value tensors across decode steps so each new token projects only $M=1$ query/key/value vector ($9.2\times$ throughput gain at $L=2048$), isolating unfused PyTorch kernel launch overhead and attention memory traffic via `nsys` and `ncu`. See [REPORTS.md](REPORTS.md) and [custom-serving/README.md](custom-serving/README.md).
-6. **Custom Stage 2: Tiled Attention (FlashAttention-style) (Planned)**  
-   Investigate how tiling reduces intermediate memory traffic during prefill.
+6. **Custom Stage 2: Tiled Attention (FlashAttention-style) (`stage-2-custom`)**  
+   Replace unfused PyTorch attention with a custom Triton FlashAttention-2 GQA kernel using SRAM online softmax ($11.8\times$ prefill attention AI jump to $1,597.8\text{ FLOP/B}$, $-89.1\%$ attention DRAM bandwidth, and $-40.6\%$ TTFT at $L=2048$ matching vLLM), while exposing single-token decode SM under-utilization (`grid=(1, 12, 1)`). See [REPORTS.md](REPORTS.md) and [custom-serving/README.md](custom-serving/README.md).
 7. **Custom Stage 3: Parallel Decode Attention (Split-K / FlashDecode-style) (Planned)**  
    Test whether splitting attention work across more thread blocks improves GPU utilization during token generation.
 8. **Custom Stage 4: Paged KV Cache (PagedAttention-style) (Planned)**  
@@ -239,7 +246,8 @@ These are learning experiments, not guaranteed improvements. Each optimization i
 | **Comparison dashboard** | Implemented | Interactive Plotly HTML report (`benchmarks/plot_dashboard.py`) |
 | **Custom Stage 0: Naive PyTorch** | Tested | From-scratch model, naive engine, FastAPI SSE server, parity test, closed-loop sweeps (`C=1..16`, `L=128..2048`), `nsys` profile |
 | **Custom Stage 1: Naive KV Cache** | Tested | Per-layer KV cache model & engine, shared `custom-serving/test_parity.py`, closed-loop sweeps (`C=1..16`, `L=128..2048`), `nsys` and `ncu` profiles |
-| **Custom Stages 2–5: Optimizations** | Planned | Tiled attention, split-K decode, paged KV, operator fusion |
+| **Custom Stage 2: Tiled Attention** | Tested | Custom Triton FlashAttention-2 GQA kernel (`_flash_attention_fwd`), closed-loop sweeps (`C=1..16`, `L=128..2048`), `nsys` and `ncu` profiles |
+| **Custom Stages 3–5: Optimizations** | Planned | Split-K decode attention, paged KV, operator fusion |
 
 ---
 
