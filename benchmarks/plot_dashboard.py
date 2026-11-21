@@ -105,7 +105,7 @@ def canonical_kernel_info(
 
     if "linear" in lbl or "gemm" in lbl or "gemv" in lbl:
         return (f"{p} Linear (GEMM/GEMV)", f"{p} Linear", True, p_offset + 1)
-    if "combine" in lbl:
+    if "combine" in lbl or "combine" in raw:
         return (f"{p} Attention Combine", f"{p} Attn Combine", False, p_offset + 3)
     if (
         "flash_attention" in lbl
