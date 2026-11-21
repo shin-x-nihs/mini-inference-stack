@@ -2,7 +2,7 @@
 
 From-scratch PyTorch/CUDA inference engines built **strictly additively**: each stage copies `stage-(N-1)` and implements one architectural upgrade on top of it.
 
-All stages serve `Qwen/Qwen2.5-Coder-1.5B-Instruct` (`bfloat16`) via an OpenAI-compatible `POST /v1/chat/completions` SSE endpoint on port `8000` (configured by root `config.yaml`), emit `prefill_step` / `decode_step` / `attn_compute` NVTX ranges for `benchmarks/profile_nsys.sh`, and support standalone Layer 0 kernel profiling via `benchmarks/profile_ncu.sh <stage-id>` (Stage 0 deferred NCU profiling since `nsys` timeline metrics already isolated full-sequence decode recomputation). Shared parity verification lives at `custom-serving/test_parity.py` (`--stage stage-0-baseline|stage-1-kv-cache|all`), loading each stage's `model.py` and `engine.py` in isolation to verify single-step prefill logits and 100% greedy token ID parity against HuggingFace `AutoModelForCausalLM` (`attn_implementation="eager"`).
+All stages serve `Qwen/Qwen2.5-Coder-1.5B-Instruct` (`bfloat16`) via an OpenAI-compatible `POST /v1/chat/completions` SSE endpoint on port `8000` (configured by root `config.yaml`), emit `prefill_step` / `decode_step` / `attn_compute` NVTX ranges for `benchmarks/profile_nsys.sh`, and support standalone Layer 0 kernel profiling via `benchmarks/profile_ncu.sh <stage-id>` (Stage 0 deferred NCU profiling since `nsys` timeline metrics already isolated full-sequence decode recomputation). Shared parity verification lives at `custom-serving/test_parity.py` (`--stage stage-0-baseline|stage-1-kv-cache|stage-2-tiled-attn|all`), loading each stage's `model.py` and `engine.py` in isolation to verify single-step prefill logits and 100% greedy token ID parity against HuggingFace `AutoModelForCausalLM` (`attn_implementation="eager"`).
 
 ---
 
@@ -27,11 +27,21 @@ Eliminates redundant decode sequence recomputation while remaining pure eager Py
 
 ---
 
+## Stage 2: Tiled Attention (`stage-2-tiled-attn/`)
+
+Replaces eager PyTorch `(Q @ K^T)` attention with a custom Triton FlashAttention-2 kernel (`_flash_attention_fwd`):
+
+- **`model.py`**: Tiles $Q$ (`BLOCK_M=64` prefill, `BLOCK_M=16` decode) and $K, V$ (`BLOCK_N=64`) in SRAM with online float32 softmax (`m_i`, `l_i`, `acc`) to eliminate the $O(S^2)$ HBM attention matrix materialization. Indexes GQA KV heads directly inside the Triton kernel (`kv_head_idx = head_idx // num_kv_groups`) without `repeat_interleave`, and writes directly to a zero-copy `[B, S_q, H_q, D]` output buffer reshaped to `[B, S_q, hidden_size]` without post-attention transpose copies.
+- **`engine.py`**: Warms up with a 64-token dummy prefill followed by a 1-token decode step outside NVTX ranges so both Triton kernel specializations (`BLOCK_M=64` and `BLOCK_M=16`) JIT-compile before `/health` serves traffic.
+- **`server.py` & `serve.sh`**: Self-contained Stage 2 FastAPI/uvicorn serving snapshot (`stage2-gpu` executor thread).
+
+---
+
 ## Optimization Roadmap
 
 - **Stage 0: Naive PyTorch (`stage-0-baseline/`)** — Full-sequence recomputation, explicit `(Q @ K^T)` attention, serialized `asyncio.Lock` serving.
 - **Stage 1: KV Caching (`stage-1-kv-cache/`)** — Cache per-layer K and V tensors across decode steps to eliminate redundant sequence recomputation.
-- **Stage 2: Tiled Attention (FlashAttention-style)** — Tile prefill attention in SRAM to avoid materializing the full $S \times S$ attention matrix in HBM.
+- **Stage 2: Tiled Attention (`stage-2-tiled-attn/`)** — Tile prefill attention in SRAM to avoid materializing the full $S \times S$ attention matrix in HBM.
 - **Stage 3: Parallel Decode Attention (Split-K / FlashDecode-style)** — Split long-context KV reductions across thread blocks to improve SM occupancy during decode.
 - **Stage 4: Paged KV Cache (PagedAttention-style)** — Store KV cache in fixed-size non-contiguous blocks to eliminate memory fragmentation and support batching.
 - **Stage 5: Operator Fusion** — Fuse elementwise, normalization, and rotary kernels to reduce kernel-launch overhead and intermediate DRAM traffic.
