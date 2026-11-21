@@ -23,7 +23,7 @@ This project explores how LLM inference works and how GPU optimizations affect i
 
 The codebase is organized into **two parallel folds**:
 * **`vllm-reference/` (Reference Track):** Production-grade vLLM implementations used to establish upper-bound performance targets, latency boundaries, and reference profiler traces. **(Philosophy: Feature Isolation — evaluating one high-level optimization at a time).**
-* **`custom-serving/` (Custom Track):** Progressive, from-scratch inference implementations (currently through `stage-4-paged-kv`) progressing through custom kernels and memory managers, built to demystify GPU performance from first principles. **(Philosophy: Strictly Additive — redoing history by stacking each optimization on top of the last).**
+* **`custom-serving/` (Custom Track):** Progressive, from-scratch inference implementations (currently through `stage-5-fused-ops`) progressing through custom kernels and memory managers, built to demystify GPU performance from first principles. **(Philosophy: Strictly Additive — redoing history by stacking each optimization on top of the last).**
 
 The goal isn't to build a replacement for vLLM. It's to learn by experimenting: measure the baseline, find out where execution time is spent, implement optimizations one step at a time, and compare the results.
 
@@ -83,7 +83,8 @@ mini-inference-stack/
 │   ├── stage-1-kv-cache/           # Naive PyTorch KV cache engine (Stage 1)
 │   ├── stage-2-tiled-attn/         # Custom Triton FlashAttention-2 engine (Stage 2)
 │   ├── stage-3-split-k/            # Custom Triton Split-K / FlashDecode engine (Stage 3)
-│   └── stage-4-paged-kv/           # Paged KV cache & continuous batching engine (Stage 4)
+│   ├── stage-4-paged-kv/           # Paged KV cache & continuous batching engine (Stage 4)
+│   └── stage-5-fused-ops/          # Fused Triton RMSNorm/RoPE/SwiGLU engine (Stage 5)
 └── benchmarks/                     # Benchmark and profiling suite
     ├── bench_closed_loop.sh        # Closed-loop concurrency & context sweeps
     ├── profile_nsys.sh             # Nsight Systems timeline profiling
@@ -163,6 +164,9 @@ In Terminal 1:
 
 # Or Custom Track Stage 4: Paged KV Cache & Continuous Batching
 ./custom-serving/stage-4-paged-kv/serve.sh
+
+# Or Custom Track Stage 5: Operator Fusion
+./custom-serving/stage-5-fused-ops/serve.sh
 ```
 
 ### 2. Run Benchmarks
@@ -180,6 +184,7 @@ In Terminal 2 (while the server is running):
 ./benchmarks/bench_closed_loop.sh stage-2-custom
 ./benchmarks/bench_closed_loop.sh stage-3-custom
 ./benchmarks/bench_closed_loop.sh stage-4-custom
+./benchmarks/bench_closed_loop.sh stage-5-custom
 ```
 
 ### 3. Profile GPU Execution
@@ -194,6 +199,7 @@ In Terminal 2 (while the server is running):
 ./benchmarks/profile_nsys.sh stage-2-custom
 ./benchmarks/profile_nsys.sh stage-3-custom
 ./benchmarks/profile_nsys.sh stage-4-custom
+./benchmarks/profile_nsys.sh stage-5-custom
 
 # Kernel profile (runs standalone; stop the server first to avoid GPU memory contention.
 # Stage 0 custom deferred NCU since nsys already isolated full-sequence decode recomputation.)
@@ -204,6 +210,7 @@ In Terminal 2 (while the server is running):
 ./benchmarks/profile_ncu.sh stage-2-custom
 ./benchmarks/profile_ncu.sh stage-3-custom
 ./benchmarks/profile_ncu.sh stage-4-custom
+./benchmarks/profile_ncu.sh stage-5-custom
 ```
 
 ### 4. Generate the Dashboard
@@ -213,7 +220,7 @@ In Terminal 2 (while the server is running):
 uv run python benchmarks/plot_dashboard.py
 
 # Compare specific stages
-uv run python benchmarks/plot_dashboard.py --stages stage-0-vllm stage-1-vllm stage-2-vllm stage-0-custom stage-1-custom stage-2-custom stage-3-custom stage-4-custom -o comparison.html
+uv run python benchmarks/plot_dashboard.py --stages stage-0-vllm stage-1-vllm stage-2-vllm stage-0-custom stage-1-custom stage-2-custom stage-3-custom stage-4-custom stage-5-custom -o comparison.html
 ```
 
 ---
@@ -241,8 +248,8 @@ Each stage explores one main question at a time, checks that the implementation 
    Partition decode KV sequences across parallel thread blocks with a log-sum-exp combine kernel (`3.26×` faster Layer 0 decode attention, `6.54×` lower total attention kernel time, and up to `+7.3%` context-sweep throughput), exposing `703.33 ms` of CPU launch overhead as the next bottleneck. See [REPORTS.md](REPORTS.md) and [custom-serving/README.md](custom-serving/README.md).
 8. **Custom Stage 4: Paged KV Cache & Continuous Batching (`stage-4-custom`)**  
    Replace per-request `torch.cat` KV reallocation and `asyncio.Lock` serialization with a `BlockAllocator` (`KV_BLOCK_SIZE = 16`), Triton `_reshape_and_cache` (`4.61×` faster Layer 0 decode KV write), and iteration-level $M = B$ batched decode (`1,260.39 tok/s` at $C=64$ — `102.3%` of `stage-0-vllm`, `13.60×` over Stage 3 at $C=16$), isolating `669.98 ms` of CPU launch overhead and `3,584` unfused RoPE `CatArrayBatchedCopy` calls for Stage 5. See [REPORTS.md](REPORTS.md) and [custom-serving/README.md](custom-serving/README.md).
-9. **Custom Stage 5: Operator Fusion (`stage-5-fusion`) (Planned)**  
-   Fuse RoPE (`rotate_half`), RMSNorm + residual, and SwiGLU kernels and evaluate CUDA Graphs to eliminate launch overhead and remaining elementwise memory traffic.
+9. **Custom Stage 5: Operator Fusion (`stage-5-custom`)**  
+   Replace unfused PyTorch elementwise/concat chains with custom Triton `_rms_norm_fwd` (plus residual-add fusion), in-place `_rope_embedding_fwd` (eliminating all `3,584` `CatArrayBatchedCopy` launches), and combined `gate_up_proj` + `_swiglu_fwd` kernels—cutting total kernel launches **3.03×** (`72,933` → `24,101`, `-66.95%`), CPU launch overhead by **`-45.57%`** (`669.98 ms` → `364.68 ms`), and GPU idle time from `53.53%` to `28.97%`, lifting $C=1$ throughput **`+77.7%`** (`38.51` → `68.44 tok/s`, TPOT `25.70` → `14.19 ms`) and $C=64$ throughput to **`1,486.13 tok/s`** (`120.6%` of `stage-0-vllm`), with CUDA Graphs remaining as future work to address the remaining `364.68 ms` host dispatch overhead. See [REPORTS.md](REPORTS.md) and [custom-serving/README.md](custom-serving/README.md).
 
 These are learning experiments, not guaranteed improvements. Each optimization is evaluated by measuring its results and understanding its trade-offs.
 
@@ -263,7 +270,7 @@ These are learning experiments, not guaranteed improvements. Each optimization i
 | **Custom Stage 2: Tiled Attention** | Tested | Custom Triton FlashAttention-2 GQA kernel (`_flash_attention_fwd`), closed-loop sweeps (`C=1..16`, `L=128..2048`), `nsys` and `ncu` profiles |
 | **Custom Stage 3: Parallel Decode (Split-K)** | Tested | Two-stage Triton Split-K decode + combine kernels, closed-loop sweeps (`C=1..16`, `L=128..2048`), `nsys` and `ncu` profiles |
 | **Custom Stage 4: Paged KV & Continuous Batching** | Tested | `BlockAllocator` + Triton `_reshape_and_cache` + continuous batching scheduler, closed-loop sweeps (`C=1..64`, `L=128..8192`), `nsys` and `ncu` profiles |
-| **Custom Stage 5: Operator Fusion** | Planned | Fused RoPE / RMSNorm / SwiGLU Triton kernels (`stage-5-fusion/`) and CUDA Graphs |
+| **Custom Stage 5: Operator Fusion** | Tested | Fused RMSNorm+residual / RoPE / `gate_up_proj`+SwiGLU Triton kernels (`stage-5-fused-ops/`), closed-loop sweeps (`C=1..64`, `L=128..8192`), `nsys` and `ncu` profiles |
 
 ---
 

@@ -211,6 +211,272 @@ def _compute_hf_reference(
         torch.cuda.empty_cache()
 
 
+def _verify_stage5_fused_ops(
+    stage_name: str,
+    model_mod: ModuleType,
+    model: object,
+    model_name: str,
+    torch_dtype: torch.dtype,
+    device: str,
+) -> None:
+    import torch.nn.functional as F
+    import triton
+    from safetensors import safe_open
+
+    atol = (
+        3e-2
+        if torch_dtype == torch.bfloat16
+        else (5e-3 if torch_dtype == torch.float16 else 1e-5)
+    )
+    rtol = (
+        2e-2
+        if torch_dtype == torch.bfloat16
+        else (5e-3 if torch_dtype == torch.float16 else 1e-5)
+    )
+
+    inter_size = model.config.intermediate_size  # type: ignore[attr-defined]
+    hidden_size = model.config.hidden_size  # type: ignore[attr-defined]
+    model_dir = model_mod.resolve_model_dir(model_name)
+    shard_paths = sorted(model_dir.glob("*.safetensors"))
+    assert shard_paths, f"[{stage_name}] No .safetensors files in {model_dir}"
+
+    ref_gate: dict[int, torch.Tensor] = {}
+    ref_up: dict[int, torch.Tensor] = {}
+    layer_pat = re.compile(
+        r"^(?:model\.)?layers\.(\d+)\.mlp\.(gate_proj|up_proj)\.weight$"
+    )
+    for shard_path in shard_paths:
+        with safe_open(str(shard_path), framework="pt", device="cpu") as sf:
+            for key in sf.keys():
+                m = layer_pat.match(key)
+                if not m:
+                    continue
+                layer_idx = int(m.group(1))
+                proj_kind = m.group(2)
+                t = sf.get_tensor(key).to(dtype=torch_dtype)
+                if proj_kind == "gate_proj":
+                    ref_gate[layer_idx] = t
+                else:
+                    ref_up[layer_idx] = t
+
+    layers = model.layers  # type: ignore[attr-defined]
+    assert len(ref_gate) == len(layers) and len(ref_up) == len(layers), (
+        f"[{stage_name}] Missing MLP reference weights in safetensors: "
+        f"gate={len(ref_gate)}, up={len(ref_up)}, layers={len(layers)}"
+    )
+    gu_cpu = None
+    for layer_idx, layer in enumerate(layers):
+        assert not hasattr(layer.mlp, "gate_proj") and not hasattr(
+            layer.mlp, "up_proj"
+        ), f"[{stage_name}] Layer {layer_idx} unexpectedly kept unfused gate_proj/up_proj"
+        gu_cpu = layer.mlp.gate_up_proj.weight.detach().cpu()
+        assert tuple(gu_cpu.shape) == (2 * inter_size, hidden_size), (
+            f"[{stage_name}] Layer {layer_idx} gate_up_proj shape {tuple(gu_cpu.shape)} "
+            f"!= {(2 * inter_size, hidden_size)}"
+        )
+        assert torch.equal(gu_cpu[:inter_size], ref_gate[layer_idx]), (
+            f"[{stage_name}] Layer {layer_idx} gate_up_proj[:{inter_size}] != gate_proj.weight"
+        )
+        assert torch.equal(gu_cpu[inter_size:], ref_up[layer_idx]), (
+            f"[{stage_name}] Layer {layer_idx} gate_up_proj[{inter_size}:] != up_proj.weight"
+        )
+    del ref_gate, ref_up, gu_cpu
+
+    with torch.inference_mode():
+        # Verify _rms_norm_fwd (HAS_RESIDUAL=False and HAS_RESIDUAL=True)
+        layer0_norm = layers[0].input_layernorm
+        weight = layer0_norm.weight
+        eps = float(model.config.rms_norm_eps)  # type: ignore[attr-defined]
+        block_size = triton.next_power_of_2(hidden_size)
+        num_warps = 8 if block_size >= 1024 else 4
+
+        x = torch.randn((2, 17, hidden_size), device=device, dtype=torch_dtype)
+        r = torch.randn((2, 17, hidden_size), device=device, dtype=torch_dtype)
+        x_2d = x.view(-1, hidden_size)
+        num_rows = x_2d.shape[0]
+        y = torch.empty_like(x)
+        y_2d = y.view(-1, hidden_size)
+
+        model_mod._rms_norm_fwd[(num_rows,)](
+            x_2d,
+            weight,
+            y_2d,
+            x_2d,
+            y_2d,
+            x_2d.stride(0),
+            y_2d.stride(0),
+            0,
+            0,
+            num_rows,
+            eps,
+            HIDDEN_SIZE=hidden_size,
+            BLOCK_SIZE=block_size,
+            HAS_RESIDUAL=False,
+            num_warps=num_warps,
+        )
+        x_f = x.float()
+        ref_y = weight.to(torch_dtype) * (
+            x_f * torch.rsqrt(x_f.pow(2).mean(-1, keepdim=True) + eps)
+        ).to(torch_dtype)
+        assert torch.allclose(y, ref_y, atol=atol, rtol=rtol), (
+            f"[{stage_name}] _rms_norm_fwd (HAS_RESIDUAL=False) max diff "
+            f"{(y - ref_y).abs().max().item():.6f}"
+        )
+
+        r_2d = r.view(-1, hidden_size)
+        res_out = torch.empty_like(x)
+        ro_2d = res_out.view(-1, hidden_size)
+        y_res = torch.empty_like(x)
+        y_res_2d = y_res.view(-1, hidden_size)
+        model_mod._rms_norm_fwd[(num_rows,)](
+            x_2d,
+            weight,
+            y_res_2d,
+            r_2d,
+            ro_2d,
+            x_2d.stride(0),
+            y_res_2d.stride(0),
+            r_2d.stride(0),
+            ro_2d.stride(0),
+            num_rows,
+            eps,
+            HIDDEN_SIZE=hidden_size,
+            BLOCK_SIZE=block_size,
+            HAS_RESIDUAL=True,
+            num_warps=num_warps,
+        )
+        ref_res = (x.float() + r.float()).to(torch_dtype)
+        norm_in = ref_res.float()
+        ref_y_res = weight.to(torch_dtype) * (
+            norm_in * torch.rsqrt(norm_in.pow(2).mean(-1, keepdim=True) + eps)
+        ).to(torch_dtype)
+        assert torch.allclose(res_out, ref_res, atol=atol, rtol=rtol), (
+            f"[{stage_name}] _rms_norm_fwd residual max diff "
+            f"{(res_out - ref_res).abs().max().item():.6f}"
+        )
+        assert torch.allclose(y_res, ref_y_res, atol=atol, rtol=rtol), (
+            f"[{stage_name}] _rms_norm_fwd (HAS_RESIDUAL=True) max diff "
+            f"{(y_res - ref_y_res).abs().max().item():.6f}"
+        )
+        assert isinstance(layer0_norm(x), torch.Tensor)
+        assert isinstance(layer0_norm(x, residual=r), tuple)
+        del x, r, x_2d, y, y_2d, x_f, ref_y, r_2d, res_out, ro_2d, y_res, y_res_2d, ref_res, norm_in, ref_y_res
+
+        # Verify _rope_embedding_fwd (non-contiguous S>1 .transpose(1, 2) and S=1)
+        def _eager_rope(
+            t: torch.Tensor, cos_t: torch.Tensor, sin_t: torch.Tensor
+        ) -> torch.Tensor:
+            half = t.shape[-1] // 2
+            cos_b = (
+                cos_t.unsqueeze(1)
+                if cos_t.ndim == 3
+                else cos_t.unsqueeze(0).unsqueeze(0)
+            )
+            sin_b = (
+                sin_t.unsqueeze(1)
+                if sin_t.ndim == 3
+                else sin_t.unsqueeze(0).unsqueeze(0)
+            )
+            t_rot = torch.cat((-t[..., half:], t[..., :half]), dim=-1)
+            return (t.float() * cos_b.float() + t_rot.float() * sin_b.float()).to(
+                t.dtype
+            )
+
+        num_q = model.config.num_attention_heads  # type: ignore[attr-defined]
+        num_kv = model.config.num_key_value_heads  # type: ignore[attr-defined]
+        head_dim = model.config.head_dim  # type: ignore[attr-defined]
+        half_dim = head_dim // 2
+        block_half = triton.next_power_of_2(half_dim)
+
+        for bsz, seq_len in ((2, 19), (3, 1)):
+            q = torch.randn(
+                (bsz, seq_len, num_q, head_dim), device=device, dtype=torch_dtype
+            ).transpose(1, 2)
+            k = torch.randn(
+                (bsz, seq_len, num_kv, head_dim), device=device, dtype=torch_dtype
+            ).transpose(1, 2)
+            if seq_len > 1:
+                assert not q.is_contiguous() and not k.is_contiguous()
+
+            positions = (
+                torch.arange(seq_len, device=device, dtype=torch.int32).unsqueeze(0)
+                + torch.arange(bsz, device=device, dtype=torch.int32).unsqueeze(1) * 5
+                + 7
+            )
+            cos, sin = model.rotary_emb(  # type: ignore[attr-defined]
+                positions, dtype=torch_dtype, device=torch.device(device)
+            )
+            q_ref = _eager_rope(q.clone(), cos, sin)
+            k_ref = _eager_rope(k.clone(), cos, sin)
+
+            model_mod._rope_embedding_fwd[(bsz * seq_len, num_q + num_kv)](
+                q,
+                k,
+                cos,
+                sin,
+                q.stride(0),
+                q.stride(1),
+                q.stride(2),
+                q.stride(3),
+                k.stride(0),
+                k.stride(1),
+                k.stride(2),
+                k.stride(3),
+                cos.stride(0) if cos.ndim == 3 and cos.shape[0] > 1 else 0,
+                cos.stride(-2),
+                cos.stride(-1),
+                sin.stride(0) if sin.ndim == 3 and sin.shape[0] > 1 else 0,
+                sin.stride(-2),
+                sin.stride(-1),
+                bsz,
+                seq_len,
+                NUM_Q_HEADS=num_q,
+                HALF_DIM=half_dim,
+                BLOCK_HALF=block_half,
+                num_warps=2,
+            )
+            assert torch.allclose(q, q_ref, atol=atol, rtol=rtol), (
+                f"[{stage_name}] _rope_embedding_fwd Q (B={bsz}, S={seq_len}) max diff "
+                f"{(q - q_ref).abs().max().item():.6f}"
+            )
+            assert torch.allclose(k, k_ref, atol=atol, rtol=rtol), (
+                f"[{stage_name}] _rope_embedding_fwd K (B={bsz}, S={seq_len}) max diff "
+                f"{(k - k_ref).abs().max().item():.6f}"
+            )
+            del q, k, positions, cos, sin, q_ref, k_ref
+
+        # Verify _swiglu_fwd
+        gu = torch.randn((2, 17, 2 * inter_size), device=device, dtype=torch_dtype)
+        gu_2d = gu.view(-1, 2 * inter_size)
+        num_rows = gu_2d.shape[0]
+        out = torch.empty((2, 17, inter_size), device=device, dtype=torch_dtype)
+        out_2d = out.view(-1, inter_size)
+        block_n = 512
+        grid = (num_rows, triton.cdiv(inter_size, block_n))
+        model_mod._swiglu_fwd[grid](
+            gu_2d,
+            out_2d,
+            gu_2d.stride(0),
+            out_2d.stride(0),
+            num_rows,
+            INTERMEDIATE_SIZE=inter_size,
+            BLOCK_N=block_n,
+            num_warps=4,
+        )
+        ref_out = (
+            F.silu(gu[..., :inter_size].float()) * gu[..., inter_size:].float()
+        ).to(torch_dtype)
+        assert torch.allclose(out, ref_out, atol=atol, rtol=rtol), (
+            f"[{stage_name}] _swiglu_fwd max diff {(out - ref_out).abs().max().item():.6f}"
+        )
+        del gu, gu_2d, out, out_2d, ref_out
+
+    print(
+        f"[{stage_name}] PASS: gate_up_proj weight slicing ({len(layers)} layers) "
+        f"and fused Triton kernels (_rms_norm_fwd, _rope_embedding_fwd, _swiglu_fwd) verified!"
+    )
+
+
 def run_parity(
     stage: str = "all",
     num_tokens: int = 32,
@@ -326,6 +592,16 @@ def run_parity(
                 f"[{stage_name}] Expected engine.model to be an instance of "
                 f"{Qwen2Model}, got {type(engine.model)}"
             )
+
+            if hasattr(engine.model.layers[0].mlp, "gate_up_proj"):
+                _verify_stage5_fused_ops(
+                    stage_name=stage_name,
+                    model_mod=model_mod,
+                    model=engine.model,
+                    model_name=model_name,
+                    torch_dtype=torch_dtype,
+                    device=device,
+                )
 
             if is_paged_stage:
                 allocator = engine.allocator
@@ -538,8 +814,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=str,
         default="all",
         help="Stage directory name under custom-serving/ (e.g. stage-0-baseline, "
-        "stage-1-kv-cache, stage-2-tiled-attn, stage-3-split-k, stage-4-paged-kv) "
-        "or 'all' (default: all).",
+        "stage-1-kv-cache, stage-2-tiled-attn, stage-3-split-k, stage-4-paged-kv, "
+        "stage-5-fused-ops) or 'all' (default: all).",
     )
     parser.add_argument(
         "--num-tokens",

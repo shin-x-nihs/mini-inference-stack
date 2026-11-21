@@ -679,7 +679,7 @@ All `stage-4-custom` sweep runs completed with `failed: 0`. Across the full `L=1
 #### 5. Conclusion & Stage 5 Handoff
 Stage 4 unlocked full continuous batching and paged memory management: aggregate throughput scaled **32.7×** from `C=1` (`38.51 tok/s`) to **`1,260.39 tok/s` at `C=64`**—**13.60×** over Stage 3 at `C=16` (`525.85` vs `38.67 tok/s`), **91×** lower `C=16` TTFT (`517.92 ms` vs `47,151.62 ms`), and **102.3% of `stage-0-vllm` (`1,232.26 tok/s`) at `C=64`** with `5×` tighter P99 ITL (`52.30 ms` vs `258.96 ms`). Meanwhile, Triton `_reshape_and_cache` cut Layer 0 decode KV-cache write latency **4.61×** (`24.64 µs` → `5.34 µs`) and enabled flat `~22 ms/tok` decode all the way to `L=8192`.
 
-The remaining gap at low concurrency (`19.68 ms/step` vs `10.67 ms/step` in vLLM) is now isolated cleanly to **operator fragmentation and CPU kernel-launch overhead** (`669.98 ms` across `72,932` launches, `53.53%` GPU idle time), specifically the `3,584` `CatArrayBatchedCopy` launches from unfused `rotate_half` RoPE plus separate PyTorch RMSNorm, residual-add, and SwiGLU launches—setting up **Stage 5 (`stage-5-fusion`: Operator Fusion + CUDA Graphs)** as the next targeted optimization.
+The remaining gap at low concurrency (`19.68 ms/step` vs `10.67 ms/step` in vLLM) is now isolated cleanly to **operator fragmentation and CPU kernel-launch overhead** (`669.98 ms` across `72,932` launches, `53.53%` GPU idle time), specifically the `3,584` `CatArrayBatchedCopy` launches from unfused `rotate_half` RoPE plus separate PyTorch RMSNorm, residual-add, and SwiGLU launches—setting up **Stage 5 (`stage-5-custom` / `custom-serving/stage-5-fused-ops/`: Operator Fusion)** as the next targeted optimization.
 
 #### 6. Data Sources and Reproducibility
 * `benchmarks/results/stage-4-custom/pareto_c{1,2,4,8,16,32,64}.json`
@@ -690,5 +690,74 @@ The remaining gap at low concurrency (`19.68 ms/step` vs `10.67 ms/step` in vLLM
 
 ---
 
-### Stage 5 (Custom): Operator Fusion (`stage-5-fusion`) — Next Target
-* **Target Bottlenecks:** Eliminate the `3,584` `CatArrayBatchedCopy` launches from unfused `rotate_half` RoPE, fuse RMSNorm + residual addition and SwiGLU elementwise chains into custom Triton kernels, and evaluate CUDA Graphs to collapse the `669.98 ms` (`53.53%` GPU idle) dispatch bottleneck at `C=1`.
+### Stage 5 (Custom): Operator Fusion (`stage-5-custom`)
+
+*Server directory: `custom-serving/stage-5-fused-ops/` | Benchmark stage: `stage-5-custom`*
+
+#### 1. Motivation, Hypothesis, and Speedup Model
+* **Motivation (Stage 4 Bottleneck):** Although Stage 4 solved continuous batching and paged KV caching, single-request decode remained host-dispatch bound (`19.68 ms/step` vs. `10.67 ms/step` in `stage-0-vllm`). Nsight Systems on `1024-in / 64-out` (`C=1`) recorded **`72,933` total CUDA kernels** (`72,932` CPU launch calls), **`669.98 ms` of `cpu_launch_overhead_ms`**, **`53.53%` (`858.12 ms`) GPU idle time**, and **`137.74 ms` (`18.5%` of GPU active time)** in `norm_act_other`, including **`3,584` `CatArrayBatchedCopy` launches** (`2 × 28 × 64`) from PyTorch `rotate_half` (`torch.cat((-x2, x1), dim=-1)`), unfused `RMSNorm` (`pow` → `mean` → `rsqrt` → cast → `mul`) plus separate residual `CUDAFunctor_add` kernels, and separate `gate_proj` / `up_proj` + `silu` + `mul` launches in `SwiGLUMLP`.
+* **Hypothesis & Speedup Model:** Replacing these unfused chains with three custom Triton kernels (`_rms_norm_fwd` with residual threading, in-place 4D-strided `_rope_embedding_fwd`, and combined `gate_up_proj` + `_swiglu_fwd`) eliminates ~48.8k elementwise, reduction, concat, residual-add, and split-GEMM launches per 1024-in/64-out request (`72,933` → `~24.1k` kernels), collapsing `cpu_launch_overhead_ms`, shrinking `norm_act_other_ms`, and shifting `C=1` decode closer to vLLM's `10.67 ms/step`.
+
+#### 2. Experiment Setup
+* **Hardware & Model:** NVIDIA GeForce RTX 5080 Laptop GPU (`896.0 GB/s` DRAM ceiling, `40.0 TFLOP/s` BF16 Tensor Core ceiling), `Qwen/Qwen2.5-Coder-1.5B-Instruct` in `bfloat16`, `max_model_len = 9216`, `KV_BLOCK_SIZE = 16`, `num_blocks = 4096`, `max_batch_size = 64`.
+* **Architecture Changes (`custom-serving/stage-5-fused-ops/model.py`):**
+  1. **Fused RMSNorm + Residual (`_rms_norm_fwd`):** Single-pass Triton kernel accumulating variance in `fp32`, computing `tl.math.rsqrt`, casting to `bfloat16`, and multiplying by weight; threads `(hidden_states, residual)` across all 28 `Qwen2Layer` blocks and the final `self.norm` (`HAS_RESIDUAL=True`), eliminating standalone `CUDAFunctor_add` launches.
+  2. **Fused In-Place RoPE (`_rope_embedding_fwd`):** Single-launch Triton kernel rotating `q` and `k` in-place using explicit 4D strides (handling non-contiguous `.transpose(1, 2)` prefill tensors without `.contiguous()` copies), eliminating `rotate_half` slicing and all `CatArrayBatchedCopy` launches.
+  3. **Combined `gate_up_proj` + `_swiglu_fwd`:** Merges `gate_proj` and `up_proj` into a single `nn.Linear(hidden_size, 2 * intermediate_size, bias=False)` (concatenating safetensors `gate_proj.weight` and `up_proj.weight` along `dim=0` across shards in `Qwen2Model.from_pretrained`), followed by the 2D-tiled `_swiglu_fwd` Triton kernel (`SiLU(gate) * up` in registers).
+* **Workloads & Parity:** `test_parity.py --stage all` (`32/32` greedy token parity, prefill logit tolerance, `gate_up_proj` weight slicing & Triton kernel checks, `B=4` batched parity & `256/256` block reclamation); closed-loop Pareto (`pareto_c{1,2,4,8,16,32,64}.json`, `512`-in / `128`-out) and Context (`context_l{128..8192}.json`, `C=1`, `64`-out) sweeps; `nsys` (`1024`-in / `64`-out, `C=1`) and standalone Layer 0 `ncu` (`L=2048` Prefill / `M=1` Decode).
+
+#### 3. Benchmark Results (`stage-4-custom` & `stage-0-vllm` vs. `stage-5-custom`)
+
+| Sweep Point | `stage-4-custom` | `stage-5-custom` | `stage-0-vllm` (Ref) | Stage 5 vs. Stage 4 |
+| :--- | :--- | :--- | :--- | :--- |
+| **Pareto C=1** | 38.51 tok/s (TPOT 25.70 ms, TTFT 59.12 ms) | **68.44 tok/s** (TPOT 14.19 ms, TTFT 67.15 ms) | 87.77 tok/s (TPOT 10.90 ms) | **+77.7% (1.78×)**, TPOT -44.8% |
+| **Pareto C=2** | 72.14 tok/s (TPOT 27.01 ms, TTFT 116.90 ms) | **133.29 tok/s** (TPOT 14.34 ms, TTFT 98.76 ms) | 169.46 tok/s (TPOT 10.98 ms) | **+84.8% (1.85×)**, TPOT -46.9% |
+| **Pareto C=4** | 163.71 tok/s (TPOT 23.35 ms, TTFT 161.72 ms) | **233.36 tok/s** (TPOT 15.84 ms, TTFT 181.85 ms) | 353.74 tok/s (TPOT 10.15 ms) | **+42.5% (1.43×)**, TPOT -32.2% |
+| **Pareto C=8** | 290.94 tok/s (TPOT 25.15 ms, TTFT 324.23 ms) | **469.40 tok/s** (TPOT 14.62 ms, TTFT 323.51 ms) | 561.94 tok/s (TPOT 12.27 ms) | **+61.3% (1.61×)**, TPOT -41.9% |
+| **Pareto C=16** | 525.85 tok/s (TPOT 26.58 ms, TTFT 517.92 ms) | **748.22 tok/s** (TPOT 17.56 ms, TTFT 505.97 ms) | 831.19 tok/s (TPOT 16.08 ms) | **+42.3% (1.42×)**, TPOT -33.9% |
+| **Pareto C=32** | 901.88 tok/s (TPOT 28.97 ms, P99 ITL 44.72 ms) | **1,116.76 tok/s** (TPOT 22.10 ms, P99 ITL 32.28 ms) | 966.96 tok/s (TPOT 27.86 ms, P99 ITL 239.19 ms) | **+23.8% (1.24×)** (**115.5% of vLLM**) |
+| **Pareto C=64** | 1,260.39 tok/s (TPOT 38.92 ms, P99 ITL 52.30 ms) | **1,486.13 tok/s** (TPOT 31.71 ms, P99 ITL 39.64 ms) | 1,232.26 tok/s (TPOT 45.15 ms, P99 ITL 258.96 ms) | **+17.9% (1.18×)** (**120.6% of vLLM**) |
+| **Context L=128** | 46.58 tok/s (TPOT 21.12 ms, TTFT 43.25 ms) | **75.31 tok/s** (TPOT 12.85 ms, TTFT 39.70 ms) | 89.04 tok/s (TPOT 10.67 ms) | **+61.7% (1.62×)**, TPOT -39.1% |
+| **Context L=256** | 46.25 tok/s (TPOT 21.15 ms, TTFT 50.61 ms) | **90.78 tok/s** (TPOT 10.45 ms, TTFT 46.15 ms) | 87.17 tok/s (TPOT 10.75 ms) | **+96.3% (1.96×)** (**104.1% of vLLM**) |
+| **Context L=512** | 48.12 tok/s (TPOT 20.13 ms, TTFT 61.62 ms) | **78.14 tok/s** (TPOT 11.84 ms, TTFT 72.51 ms) | 89.40 tok/s (TPOT 10.09 ms) | **+62.4% (1.62×)**, TPOT -41.2% |
+| **Context L=1024** | 42.78 tok/s (TPOT 21.91 ms, TTFT 115.22 ms) | **68.67 tok/s** (TPOT 12.74 ms, TTFT 129.08 ms) | 95.23 tok/s (TPOT 8.99 ms) | **+60.5% (1.61×)**, TPOT -41.9% |
+| **Context L=2048** | 37.70 tok/s (TPOT 23.65 ms, TTFT 207.26 ms) | **65.85 tok/s** (TPOT 12.20 ms, TTFT 202.66 ms) | 75.68 tok/s (TPOT 10.11 ms) | **+74.7% (1.75×)**, TPOT -48.4% |
+| **Context L=4096** | 34.51 tok/s (TPOT 22.75 ms, TTFT 420.80 ms) | **49.93 tok/s** (TPOT 13.31 ms, TTFT 442.69 ms) | 59.67 tok/s (TPOT 10.41 ms) | **+44.7% (1.45×)**, TPOT -41.5% |
+| **Context L=8192** | 28.95 tok/s (TPOT 22.20 ms, TTFT 811.73 ms) | **39.09 tok/s** (TPOT 13.10 ms, TTFT 811.84 ms) | 50.95 tok/s (TPOT 9.24 ms) | **+35.0% (1.35×)**, TPOT -41.0% |
+
+All 14 `stage-5-custom` sweep JSONs completed with `failed: 0`. Across the full `L=128..8192` sweep at `C=1`, mean TPOT drops by **39.1%–50.6%** into a tight `10.45–13.31 ms/token` band (`13.10 ms` at `L=8192`), while `Pareto C=64` reaches **`1,486.13 tok/s`** (**120.6% of `stage-0-vllm`**) with **`6.53×` tighter P99 ITL** (`39.64 ms` vs. `258.96 ms`).
+
+#### 4. Profiler & Hardware Analysis
+
+##### Nsight Systems (`1024-in / 64-out`, `C=1`, NVTX-Measured)
+* **Kernel Launch Reduction (`num_kernels` & `cpu_launch_overhead_ms`):** Total CUDA kernels dropped **3.03× (-66.95%)** from `72,933` (`stage-4-custom`) to **`24,101`** (`cpu_launch_calls`: `72,932` → **`24,100`**, `-66.96%`; `cuda_graph_launches = 0`), with **zero `CatArrayBatchedCopy` launches** (`3,584` → `0`). Host `cpu_launch_overhead_ms` fell **1.84× (-45.57%)** from `669.98 ms` to **`364.68 ms`**.
+* **GPU Utilization & Wall-Clock Latency:** Eliminating 48,832 launches cut `gpu_idle_pct` from `53.53%` (`858.12 ms`) to **`28.97%` (`312.19 ms`)** (**-63.62% idle ms**), lifting `gpu_active_pct` from `46.47%` (`745.0 ms`) to **`71.03%` (`765.34 ms`)**. Overall `wall_time_ms` dropped **32.79%** (`1,603.12 ms` → **`1,077.53 ms`**): `prefill_duration_ms` fell **27.21%** (`326.94 ms` / `20.4%` → **`237.98 ms`** / `22.1%`), and `decode_total_ms` fell **36.09%** (`1,240.13 ms` → **`792.51 ms`**), cutting `decode_step_avg_ms` from `19.68 ms` to **`12.58 ms`** (**1.56× faster**, closing most of the gap to vLLM's `10.67 ms/step`). `cuda_sync_wait_ms` was `7.97 ms` (vs. `5.58 ms` in Stage 4).
+* **Kernel Time Breakdown:** `norm_act_other_ms` dropped **53.50%** from `137.74 ms` (`18.5%` of GPU time) to **`64.05 ms` (`8.4%`)**, leaving **`666.14 ms` (`87.0%`) in `linear_ms`** and **`35.15 ms` (`4.6%`) in `attention_ms`** (vs. `587.93 ms` / `78.9%` and `19.33 ms` / `2.6%` in Stage 4).
+
+##### Nsight Compute (Layer 0, `L=2048` Prefill & `M=1` Decode)
+* **Fused Triton Operators (`_rms_norm_fwd`, `_rope_embedding_fwd`, `_swiglu_fwd`):**
+  * `Prefill Fused RMSNorm` (`_rms_norm_fwd`, `grid=(2048, 1, 1)`, `block=(256, 1, 1)`): **`52.06 µs`**, `241.86 GB/s` (`26.99%` of `896.0 GB/s` ceiling; `53.39%` NCU DRAM SOL), `0.453 TFLOP/s` (`1.13%` of `40.0 TFLOP/s` ceiling; `62.37%` SM SOL), AI `1.874`, `91.49%` active warps, `32` regs, `0` spills — replacing Stage 4's multi-kernel chain plus separate residual add in a single pass.
+  * `Decode Fused RMSNorm` (`_rms_norm_fwd`, `grid=(1, 1, 1)`, `block=(256, 1, 1)`): **`6.88 µs`** (`-9.7%` vs. `7.62 µs`), `2.20 GB/s` (`0.25%` ceiling; `0.49%` DRAM SOL), `0.002 TFLOP/s` (`0.19%` SM SOL), AI `0.763`, `16.34%` active warps, `32` regs, `0` spills.
+  * `Prefill RoPE Embedding` (`_rope_embedding_fwd`, `grid=(2048, 14, 1)`, `block=(64, 1, 1)`): **`63.26 µs`**, `132.67 GB/s` (`14.81%` ceiling; `29.31%` DRAM SOL), `0.232 TFLOP/s` (`0.58%` ceiling; `71.09%` SM SOL), AI `1.749`, `83.90%` active warps, `20` regs, `0` spills — rotating Q and K in-place with zero `CatArrayBatchedCopy` allocations.
+  * `Decode RoPE Embedding` (`_rope_embedding_fwd`, `grid=(1, 14, 1)`, `block=(64, 1, 1)`): **`5.66 µs`** (**-29.8%** vs. `8.06 µs`), `1.58 GB/s` (`0.18%` ceiling; `0.36%` DRAM SOL), `0.001 TFLOP/s` (`0.35%` SM SOL), AI `0.800`, `4.13%` active warps, `20` regs, `0` spills.
+  * `Prefill SwiGLU Activation` (`_swiglu_fwd`, `grid=(2048, 18, 1)`, `block=(128, 1, 1)`): **`242.72 µs`**, **`368.25 GB/s`** (`41.10%` ceiling; **`81.29%` NCU DRAM SOL**), `0.505 TFLOP/s` (`1.26%` ceiling; `33.74%` SM SOL), AI `1.373`, `93.39%` active warps, `22` regs, `0` spills (`Memory Bandwidth`).
+  * `Decode SwiGLU Activation` (`_swiglu_fwd`, `grid=(1, 18, 1)`, `block=(128, 1, 1)`): **`5.02 µs`** (**-21.2%** vs. `6.37 µs`), `8.00 GB/s` (`0.89%` ceiling; `1.81%` DRAM SOL), `0.012 TFLOP/s` (`0.03%` ceiling; `0.83%` SM SOL), AI `1.490`, `8.17%` active warps, `22` regs, `0` spills.
+* **Combined `gate_up_proj` Linear Projections (`2×` output width, half the MLP up-projection launches):**
+  * `Prefill Linear GEMM`: **`4,182.50 µs`**, AI `967.862`, **`26.973 TFLOP/s`** (`67.43%` of `40.0 TFLOP/s` ceiling; **`94.49%` NCU SM SOL**), `27.87 GB/s` (`3.11%` ceiling; `6.15%` DRAM SOL), `16.67%` active warps, `232` regs, `0` spills (`Compute Pipeline`).
+  * `Decode Linear GEMV`: **`175.23 µs`**, AI `1.003`, **`324.91 GB/s`** (`36.26%` of `896.0 GB/s` ceiling; **`71.70%` NCU DRAM SOL**), `0.326 TFLOP/s` (`0.82%` ceiling; `40.13%` SM SOL), `25.22%` active warps, `164` regs, `0` spills (`Memory Bandwidth`). *(Note: NCU keeps the single longest GEMM/GEMV in Layer 0; in Stage 5 that is the `2×`-wide `gate_up_proj` instead of Stage 4's `1×` `gate_proj`/`up_proj`, while per-layer linear launches dropped from 7 to 6.)*
+* **Retained Stage 4 Attention & Paged KV Cache Kernels:**
+  * `Prefill Attention (Triton FlashAttention)` (`_flash_attention_fwd`): **`846.59 µs`**, AI `1607.900`, **`16.011 TFLOP/s`** (`40.03%` of `40.0 TFLOP/s` ceiling; `55.46%` SM SOL), `9.96 GB/s` (`2.20%` DRAM SOL), `0` spills.
+  * `Prefill KV Cache Write` (`_reshape_and_cache`): **`13.86 µs`**, `151.70 GB/s` (`16.93%` ceiling; `33.62%` DRAM SOL), `51.71%` SM SOL, AI `0.998`, `0` spills.
+  * `Decode Attention (Triton Split-K)` (`_flash_attention_decode_splitk_fwd`): **`32.67 µs`**, `65.10 GB/s` (`7.27%` ceiling; `14.41%` DRAM SOL), `0.482 TFLOP/s` (`1.21%` ceiling; `15.72%` SM SOL), AI `7.406`, `0` spills.
+  * `Decode Attention Combine (Split-K)` (`_flash_attention_splitk_combine`): **`7.49 µs`**, `14.02 GB/s` (`1.56%` ceiling; `3.12%` DRAM SOL), AI `1.288`, `0` spills.
+  * `Decode KV Cache Write` (`_reshape_and_cache`): **`5.41 µs`**, `0.99 GB/s` (`0.11%` ceiling; `0.22%` DRAM SOL), AI `0.190`, `0` spills.
+
+#### 5. Conclusion
+Stage 5 delivered the full kernel-fusion payoff predicted at the end of Stage 4: custom Triton `_rms_norm_fwd` (with residual threading), in-place `_rope_embedding_fwd`, and `gate_up_proj` + `_swiglu_fwd` cut total CUDA kernel launches **3.03×** (`72,933` → `24,101`, eliminating all `3,584` `CatArrayBatchedCopy` RoPE calls), reduced `cpu_launch_overhead_ms` by **45.57%** (`669.98 ms` → `364.68 ms`), and shrank GPU idle time from `53.53%` to **`28.97%`**. End-to-end `C=1` decode step time dropped **36.08%** (`19.68 ms` → `12.58 ms`), lifting `Pareto C=1` throughput **+77.7%** (`38.51` → `68.44 tok/s`), `Context L=256` to **`90.78 tok/s`** (`104.1%` of `stage-0-vllm`), and `Pareto C=64` to **`1,486.13 tok/s`** (`120.6%` of `stage-0-vllm` with `6.53×` lower P99 ITL). Because `cuda_graph_launches` remains `0` and `364.68 ms` (`28.97%` GPU idle) is still spent dispatching the remaining 24,100 launches at `C=1`, **CUDA Graphs** remain the primary future opportunity to close the final `~1.9 ms/step` gap to `stage-0-vllm` (`10.67 ms/step`).
+
+#### 6. Data Sources and Reproducibility
+* `benchmarks/results/stage-5-custom/pareto_c{1,2,4,8,16,32,64}.json`
+* `benchmarks/results/stage-5-custom/context_l{128,256,512,1024,2048,4096,8192}.json`
+* `benchmarks/results/stage-5-custom/nsys_metrics.json`
+* `benchmarks/results/stage-5-custom/ncu_metrics.json`
+* `benchmarks/results/dashboard.html`

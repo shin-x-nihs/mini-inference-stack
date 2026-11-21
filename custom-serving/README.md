@@ -2,7 +2,7 @@
 
 From-scratch PyTorch/CUDA inference engines built **strictly additively**: each stage copies `stage-(N-1)` and implements one architectural upgrade on top of it.
 
-All stages serve `Qwen/Qwen2.5-Coder-1.5B-Instruct` (`bfloat16`) via an OpenAI-compatible `POST /v1/chat/completions` SSE endpoint on port `8000` (configured by root `config.yaml`), emit `prefill_step` / `decode_step` / `attn_compute` NVTX ranges for `benchmarks/profile_nsys.sh`, and support standalone Layer 0 kernel profiling via `benchmarks/profile_ncu.sh <stage-id>` (Stage 0 deferred NCU profiling since `nsys` timeline metrics already isolated full-sequence decode recomputation). Shared parity verification lives at `custom-serving/test_parity.py` (`--stage stage-0-baseline|stage-1-kv-cache|stage-2-tiled-attn|stage-3-split-k|stage-4-paged-kv|all`), loading each stage's `model.py` and `engine.py` in isolation to verify single-step prefill logits and 100% greedy token ID parity against HuggingFace `AutoModelForCausalLM` (`eager` for Stages 0–1; `sdpa` for Stage 2+ fp32-accumulating kernels).
+All stages serve `Qwen/Qwen2.5-Coder-1.5B-Instruct` (`bfloat16`) via an OpenAI-compatible `POST /v1/chat/completions` SSE endpoint on port `8000` (configured by root `config.yaml`), emit `prefill_step` / `decode_step` / `attn_compute` NVTX ranges for `benchmarks/profile_nsys.sh`, and support standalone Layer 0 kernel profiling via `benchmarks/profile_ncu.sh <stage-id>` (Stage 0 deferred NCU profiling since `nsys` timeline metrics already isolated full-sequence decode recomputation). Shared parity verification lives at `custom-serving/test_parity.py` (`--stage stage-0-baseline|stage-1-kv-cache|stage-2-tiled-attn|stage-3-split-k|stage-4-paged-kv|stage-5-fused-ops|all`), loading each stage's `model.py` and `engine.py` in isolation to verify single-step prefill logits and 100% greedy token ID parity against HuggingFace `AutoModelForCausalLM` (`eager` for Stages 0–1; `sdpa` for Stage 2+ fp32-accumulating kernels).
 
 ---
 
@@ -57,6 +57,19 @@ Replaces per-request contiguous `torch.cat` KV tensors and global `asyncio.Lock`
 
 ---
 
+## Stage 5: Operator Fusion (`stage-5-fused-ops/`)
+
+Replaces unfused PyTorch elementwise, reduction, and concatenation chains with custom Triton kernels and combined `gate_up_proj` MLP weights while preserving Stage 4's paged KV cache, Split-K decode attention, and continuous batching scheduler:
+
+- **`model.py`**: Introduces three custom Triton kernels alongside Stage 4's `_reshape_and_cache`, `_flash_attention_fwd`, and Split-K decode pipeline:
+  1. `_rms_norm_fwd`: Computes variance and inverse RMS (`tl.math.rsqrt`) in fp32, casts to input dtype, and applies the scale weight in a single pass (replacing `pow`/`mean`/`rsqrt`), with optional `HAS_RESIDUAL` residual-add fusion threaded across all 28 `Qwen2Layer` blocks and the final `self.norm`.
+  2. `_rope_embedding_fwd`: Applies rotary embeddings in-place to `q` and `k` in one kernel launch using explicit 4D strides (handling non-contiguous `.transpose(1, 2)` prefill tensors without `.contiguous()` copies), completely eliminating `rotate_half` slicing and `torch.cat` (`CatArrayBatchedCopy`).
+  3. `SwiGLUMLP` (`gate_up_proj` + `_swiglu_fwd`): Combines `gate_proj` and `up_proj` into a single `nn.Linear(hidden_size, 2 * intermediate_size, bias=False)`—loaded in `Qwen2Model.from_pretrained` by concatenating safetensors `gate_proj.weight` and `up_proj.weight` along `dim=0` across shards—followed by the 2D-tiled `_swiglu_fwd` Triton kernel (`SiLU(gate) * up` in registers).
+- **`engine.py`**: Self-contained copy of Stage 4's `BlockAllocator` and `PagedEngine` (`NaiveEngine` alias) continuous-batching scheduler (`run_scheduler_loop`), warming up `L=64`, `L=192` (Split-K), and `B=2` batched shapes outside NVTX ranges so all fused Triton + attention specializations JIT-compile before `/health` serves traffic.
+- **`server.py` & `serve.sh`**: Self-contained Stage 5 FastAPI/uvicorn serving snapshot (`stage5-gpu` executor thread, `"Custom Serving - Stage 5: Operator Fusion"`, `CUSTOM_NUM_KV_BLOCKS=4096`, `CUSTOM_MAX_BATCH_SIZE=64`, `NSYS=ON` support).
+
+---
+
 ## Optimization Roadmap
 
 - **Stage 0: Naive PyTorch (`stage-0-baseline/`)** — Full-sequence recomputation, explicit `(Q @ K^T)` attention, serialized `asyncio.Lock` serving.
@@ -64,4 +77,4 @@ Replaces per-request contiguous `torch.cat` KV tensors and global `asyncio.Lock`
 - **Stage 2: Tiled Attention (`stage-2-tiled-attn/`)** — Tile prefill attention in SRAM to avoid materializing the full $S \times S$ attention matrix in HBM.
 - **Stage 3: Parallel Decode Attention (`stage-3-split-k/`)** — Split long-context KV reductions across thread blocks to improve SM occupancy during decode.
 - **Stage 4: Paged KV Cache & Continuous Batching (`stage-4-paged-kv/`)** — Store KV cache in fixed-size non-contiguous blocks and schedule iteration-level continuous batches to eliminate memory fragmentation and unlock batched decode GEMMs (`1,260.39 tok/s` at $C=64$, `4.61×` faster Layer 0 decode KV write).
-- **Stage 5: Operator Fusion (`stage-5-fusion/`)** — Fuse `rotate_half` RoPE (eliminating the remaining `3,584` `CatArrayBatchedCopy` launches), RMSNorm + residual, and SwiGLU kernels, and evaluate CUDA Graphs to reduce `669.98 ms` of CPU launch overhead.
+- **Stage 5: Operator Fusion (`stage-5-fused-ops/`)** — Fuse RMSNorm + residual (`_rms_norm_fwd`), in-place RoPE (`_rope_embedding_fwd`, eliminating all `3,584` `CatArrayBatchedCopy` launches), and `gate_up_proj` + `_swiglu_fwd`, cutting `nsys` kernel launches **3.03×** (`72,933` → `24,101`), `cpu_launch_overhead_ms` by **-45.57%** (`669.98 ms` → `364.68 ms`), and GPU idle time from `53.53%` to `28.97%` while lifting $C=1$ throughput **+77.7%** (`38.51` → `68.44 tok/s`) and $C=64$ throughput to `1,486.13 tok/s` (`120.6%` of `stage-0-vllm`). CUDA Graphs remain future work to capture the remaining `364.68 ms` host dispatch overhead (`cuda_graph_launches = 0`).

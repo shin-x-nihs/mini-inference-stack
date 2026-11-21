@@ -545,7 +545,7 @@ def classify_kernel(kname, phase, nvtx_txt=""):
         return f"{phase} Fused RMSNorm"
     if "rope" in kl or "rotary" in kl or "neg_kernel" in kl:
         return f"{phase} RoPE Embedding"
-    if "silu" in kl or "act_and_mul" in kl or "binaryfunctor" in kl:
+    if "swiglu" in kl or "silu" in kl or "act_and_mul" in kl or "binaryfunctor" in kl:
         return f"{phase} SwiGLU Activation"
     return f"{phase} {kname[:28]}"
 
