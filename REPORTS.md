@@ -550,7 +550,7 @@ Verified `32/32` greedy token ID parity across all implemented custom stages (`s
 
 ### Stage 3: Parallel Decode Attention / Split-K (`stage-3-custom`)
 
-*Server directory: `custom-serving/stage-3-split-k/` (Planned) | Benchmark stage: `stage-3-custom`*
+*Server directory: `custom-serving/stage-3-split-k/` | Benchmark stage: `stage-3-custom`*
 
 #### 1. Motivation
 
@@ -562,3 +562,60 @@ While Stage 2's query-tiled Triton FlashAttention-2 kernel (`_flash_attention_fw
 
 ##### Hypothesis
 Implementing a dedicated **Split-K / FlashDecode** kernel for decode ($q_{\text{len}} = 1$) that partitions the KV cache sequence length $L_{\text{kv}}$ across $S_k$ parallel thread blocks per head (computing partial online-softmax accumulators $(m_i^{(s)}, l_i^{(s)}, O_i^{(s)})$ in parallel and reducing them via a lightweight log-sum-exp combine kernel) will multiply active CTAs across SMs, eliminate serial KV-loop latency, and significantly increase achieved DRAM bandwidth and decode attention speed at long contexts.
+
+#### 2. Experiment Setup
+* **Engine (`custom-serving/stage-3-split-k/`):** Self-contained snapshot of Stage 2 with a two-stage Triton Split-K decode path for $q_{\text{len}} = 1$ while retaining `_flash_attention_fwd` for prefill ($q_{\text{len}} > 1$):
+  1. `_flash_attention_decode_splitk_fwd`: Partitions $L_{\text{kv}}$ across `NUM_SPLITS` parallel CTAs per head (`grid = (B * num_heads, NUM_SPLITS)`), computing partial online-softmax accumulators in `fp32` via vectorized reductions without `BLOCK_M=16` Tensor Core padding waste.
+  2. `_flash_attention_splitk_combine`: Reduces the partial `(acc, m_i, l_i)` workspace buffers across splits via log-sum-exp rescaling (`grid = (B * num_heads, 1)`).
+* **Hardware & Model:** NVIDIA GeForce RTX 5080 Laptop GPU (896.0 GB/s DRAM ceiling, 40.0 TFLOP/s BF16 Tensor Core ceiling), `Qwen/Qwen2.5-1.5B-Instruct` in `bfloat16`, `max_model_len = 9216`, `asyncio.Lock` serialized serving.
+* **Workloads:**
+  * Concurrency sweep (`pareto_c{1,2,4,8,16}.json`, 512-in / 64-out)
+  * Context-length sweep (`context_l{128,256,512,1024,2048}.json`, C=1, 64-out)
+  * Nsight Systems & Nsight Compute (`1024-in / 64-out`, `C=1`)
+
+#### 3. Benchmark Results (`stage-2-custom` vs. `stage-3-custom`)
+
+| Sweep Point | `stage-2-custom` Throughput / Latency | `stage-3-custom` Throughput / Latency | Delta |
+| :--- | :--- | :--- | :--- |
+| **Pareto C=1** | 43.97 tok/s (mean TPOT 22.44 ms, P50 ITL 19.57 ms) | **44.98 tok/s** (mean TPOT 21.93 ms, P50 ITL 19.46 ms) | **+2.3%** |
+| **Pareto C=2** | **47.73 tok/s** (mean TPOT 20.63 ms, P50 ITL 19.40 ms) | 43.02 tok/s (mean TPOT 22.92 ms, P50 ITL 19.66 ms) | -9.9% |
+| **Pareto C=4** | **45.44 tok/s** (mean TPOT 21.70 ms, P50 ITL 20.19 ms) | 43.11 tok/s (mean TPOT 22.93 ms, P50 ITL 19.00 ms) | -5.1% |
+| **Pareto C=8** | **44.96 tok/s** (mean TPOT 21.98 ms, P50 ITL 18.94 ms) | 41.96 tok/s (mean TPOT 23.59 ms, P50 ITL 19.49 ms) | -6.7% |
+| **Pareto C=16** | **40.52 tok/s** (mean TPOT 24.44 ms, P50 ITL 21.71 ms) | 38.67 tok/s (mean TPOT 25.65 ms, P50 ITL 22.39 ms) | -4.6% |
+| **Context L=128** | **45.65 tok/s** (mean TPOT 21.50 ms, TTFT 46.76 ms) | 45.35 tok/s (mean TPOT 21.68 ms, TTFT 44.78 ms) | -0.7% |
+| **Context L=256** | 47.06 tok/s (mean TPOT 20.72 ms, TTFT 53.76 ms) | **49.07 tok/s** (mean TPOT 19.87 ms, TTFT 52.06 ms) | **+4.3%** |
+| **Context L=512** | 43.50 tok/s (mean TPOT 22.22 ms, TTFT 71.15 ms) | **46.68 tok/s** (mean TPOT 20.69 ms, TTFT 67.11 ms) | **+7.3%** |
+| **Context L=1024** | 41.00 tok/s (mean TPOT 23.12 ms, TTFT 103.65 ms) | **41.16 tok/s** (mean TPOT 23.00 ms, TTFT 104.98 ms) | **+0.4%** |
+| **Context L=2048** | 40.23 tok/s (mean TPOT 22.12 ms, TTFT 196.17 ms) | **42.00 tok/s** (mean TPOT 21.15 ms, TTFT 190.76 ms) | **+4.4%** |
+
+All `stage-3-custom` sweep runs completed with `failed: 0`.
+
+#### 4. Profiler & Hardware Analysis
+
+##### Nsight Systems (`1024-in / 64-out`, `C=1`, NVTX-Measured)
+* **Total Attention Kernel Time:** Dropped from **111.20 ms** (`9.3%` of GPU time) in `stage-2-custom` to **17.00 ms** (`2.2%` of GPU time) in `stage-3-custom` — a **6.54× reduction** in aggregate attention execution time across the 64-token generation.
+* **Decode Step Latency & Wall Time:** `decode_step_avg_ms` improved from `25.19 ms` to `24.11 ms` (`1586.66 ms` → `1518.62 ms` total decode), and overall `wall_time_ms` improved from `1977.39 ms` to `1870.56 ms` (`prefill_duration_ms: 327.93 ms`, `17.5%` of wall time).
+* **CPU Launch & Idle Overhead Exposed:** Because attention shrank by `94.20 ms` and GPU active time dropped from `1201.40 ms` (`60.76%`) to `763.44 ms` (`40.81%`), GPU idle time rose to **`1107.12 ms` (`59.19%`)**, dominated by **`703.33 ms` of `cpu_launch_overhead_ms`** across **`74,220` kernel launches** (`0` CUDA graphs) plus `51.08 ms` of `cuda_sync_wait_ms`. This explains why short-context serialized `pareto_c2..c16` runs (where Split-K adds a combine kernel launch per layer per step, `74,220` vs `72,456` kernels) saw slightly lower end-to-end throughput despite faster decode attention kernels. Meanwhile, linear GEMVs account for `606.66 ms` (`79.5%` of GPU kernel time).
+
+##### Nsight Compute (Layer 0, `L=1024` Prefill & Decode)
+* **Decode Attention Main Pass (`_flash_attention_decode_splitk_fwd`, `grid=(12, 15, 1)`, `block=(128, 1, 1)`):**
+  * Execution time dropped from `129.44 µs` (`stage-2-custom`) to **`32.06 µs`** (**4.04× faster**).
+  * Combined with `_flash_attention_splitk_combine` (`7.62 µs`, `grid=(12, 1, 1)`), total Layer 0 decode attention dropped to **`39.68 µs`** (**3.26× faster**).
+  * Active warps jumped from `8.33%` to **`21.76%`**, NCU SM compute utilization rose from `5.56%` to **`21.74%`** (`0.524 TFLOP/s`, `1.31%` of `40.0 TFLOP/s` ceiling), and NCU DRAM utilization rose from `3.62%` (`16.41 GB/s`, `1.83%` of `896.0 GB/s` ceiling) to **`14.63%`** (**`66.08 GB/s`**, `7.38%` of `896.0 GB/s` ceiling), with `80` registers/thread and `0` register spills.
+* **Other Layer 0 Kernels:**
+  * `Prefill Linear GEMM`: `2168.45 µs`, AI `1105.214`, `26.013 TFLOP/s` (`65.03%` of `40.0 TFLOP/s` ceiling; NCU `compute_utilization_pct = 90.44%`, `dram_utilization_pct = 5.19%`).
+  * `Prefill Attention (_flash_attention_fwd)`: `970.75 µs`, AI `1597.843`, `13.880 TFLOP/s` (`34.70%` of `40.0 TFLOP/s` ceiling; NCU `compute_utilization_pct = 47.26%`, `dram_utilization_pct = 1.92%`).
+  * `Decode Linear GEMV`: `93.98 µs`, AI `1.015`, `293.38 GB/s` (`32.74%` of `896.0 GB/s` ceiling; NCU `dram_utilization_pct = 64.80%`, `compute_utilization_pct = 36.63%`).
+  * `Decode KV Cache Write (CatArrayBatchedCopy)`: `24.64 µs`, AI `2.223`, `42.79 GB/s` (`4.78%` of `896.0 GB/s` ceiling; NCU `dram_utilization_pct = 9.47%`, `compute_utilization_pct = 54.53%`).
+
+#### 5. Conclusion
+Stage 3 eliminated SM starvation during single-token decode attention: Layer 0 decode attention dropped **3.26×** (`129.44 µs` → `39.68 µs` combined, `32.06 µs` main pass) and aggregate attention time across a 1024-in/64-out trace dropped **6.54×** (`111.20 ms` → `17.00 ms`, now `2.2%` of GPU time), lifting `L=256..2048` context-sweep throughput by up to `+7.3%`.
+
+However, end-to-end decode step latency only moved from `25.19 ms` to `24.11 ms` because **CPU kernel-launch overhead (`703.33 ms` across `74,220` launches) leaves the GPU idle `59.19%` of the wall time**. Eliminating Python/CUDA dispatch overhead via **CUDA Graphs**—alongside fused RMSNorm/RoPE/residual ops—is now the clearest path to closing the remaining gap toward vLLM (`10.67 ms/step`).
+
+#### 6. Data Sources and Reproducibility
+* `benchmarks/results/stage-3-custom/pareto_c{1,2,4,8,16}.json`
+* `benchmarks/results/stage-3-custom/context_l{128,256,512,1024,2048}.json`
+* `benchmarks/results/stage-3-custom/nsys_metrics.json`
+* `benchmarks/results/stage-3-custom/ncu_metrics.json`
+* `benchmarks/results/dashboard.html`

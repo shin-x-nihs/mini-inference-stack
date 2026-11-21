@@ -78,13 +78,16 @@ In **Terminal 1**:
 
 # Or Custom Track Stage 2: Tiled Attention (Triton FlashAttention-2)
 ./custom-serving/stage-2-tiled-attn/serve.sh
+
+# Or Custom Track Stage 3: Parallel Decode Attention (Triton Split-K)
+./custom-serving/stage-3-split-k/serve.sh
 ```
 
 Wait until the model has loaded and the server reports readiness. The reference API is available at `http://127.0.0.1:8000/v1`.
 
 For another implementation, start its documented server script. Keep the API interface and port consistent where practical so the same client and benchmark harness can be reused.
 
-> **Note on Stage Names:** Server directories are named by path (`vllm-reference/stage-0-baseline/`, `vllm-reference/stage-1-spec-dec/`, `vllm-reference/stage-2-prefix-cache/`, `custom-serving/stage-0-baseline/`, `custom-serving/stage-1-kv-cache/`, and `custom-serving/stage-2-tiled-attn/`), while runner and benchmark scripts take stage identifiers (`stage-0-vllm`, `stage-1-vllm`, `stage-2-vllm`, `stage-0-custom`, `stage-1-custom`, and `stage-2-custom`), which directly name the result folders under `benchmarks/results/<stage-name>/`.
+> **Note on Stage Names:** Server directories are named by path (`vllm-reference/stage-0-baseline/`, `vllm-reference/stage-1-spec-dec/`, `vllm-reference/stage-2-prefix-cache/`, `custom-serving/stage-0-baseline/`, `custom-serving/stage-1-kv-cache/`, `custom-serving/stage-2-tiled-attn/`, and `custom-serving/stage-3-split-k/`), while runner and benchmark scripts take stage identifiers (`stage-0-vllm`, `stage-1-vllm`, `stage-2-vllm`, `stage-0-custom`, `stage-1-custom`, `stage-2-custom`, and `stage-3-custom`), which directly name the result folders under `benchmarks/results/<stage-name>/`.
 
 ### Profiler-Ready Launch (Nsight Systems)
 
@@ -98,6 +101,7 @@ NSYS=ON ./vllm-reference/stage-2-prefix-cache/serve.sh
 NSYS=ON ./custom-serving/stage-0-baseline/serve.sh
 NSYS=ON ./custom-serving/stage-1-kv-cache/serve.sh
 NSYS=ON ./custom-serving/stage-2-tiled-attn/serve.sh
+NSYS=ON ./custom-serving/stage-3-split-k/serve.sh
 ```
 
 *Use this only if the implementation's launch script supports the `NSYS` option.*
@@ -174,6 +178,9 @@ In **Terminal 2**:
 
 # Benchmark Custom Stage 2
 ./benchmarks/bench_closed_loop.sh stage-2-custom
+
+# Benchmark Custom Stage 3
+./benchmarks/bench_closed_loop.sh stage-3-custom
 ```
 
 The standard closed-loop script runs two sweeps:
@@ -224,6 +231,7 @@ Nsight Systems captures the overall timeline: CPU activity, CUDA calls, GPU kern
   NSYS=ON ./custom-serving/stage-0-baseline/serve.sh
   NSYS=ON ./custom-serving/stage-1-kv-cache/serve.sh
   NSYS=ON ./custom-serving/stage-2-tiled-attn/serve.sh
+  NSYS=ON ./custom-serving/stage-3-split-k/serve.sh
   ```
 * **Terminal 2:** Run the profile:
   ```bash
@@ -234,6 +242,7 @@ Nsight Systems captures the overall timeline: CPU activity, CUDA calls, GPU kern
   ./benchmarks/profile_nsys.sh stage-0-custom
   ./benchmarks/profile_nsys.sh stage-1-custom
   ./benchmarks/profile_nsys.sh stage-2-custom
+  ./benchmarks/profile_nsys.sh stage-3-custom
   ```
 
 **Outputs:**
@@ -266,6 +275,7 @@ Nsight Compute examines selected kernels in more detail, including execution tim
   # Custom track (Stage 0 deferred NCU since nsys already isolated full-sequence decode recomputation)
   ./benchmarks/profile_ncu.sh stage-1-custom
   ./benchmarks/profile_ncu.sh stage-2-custom
+  ./benchmarks/profile_ncu.sh stage-3-custom
   ```
 
 For `stage-1-vllm` (or stages containing speculative decoding), the script automatically detects the draft model and profiles Target Layer 0 verification at batch size $M = K + 1$ (where $K$ is the number of drafted tokens) alongside Prefill. For standard vLLM and `stage-*-custom` stages, it profiles Layer 0 Prefill ($L=2048$) and single-token Decode ($M = 1$).
@@ -303,7 +313,7 @@ uv run python benchmarks/plot_dashboard.py
 uv run python benchmarks/plot_dashboard.py --stages stage-0-vllm
 
 # Compare stages
-uv run python benchmarks/plot_dashboard.py --stages stage-0-vllm stage-1-vllm stage-2-vllm stage-0-custom stage-1-custom stage-2-custom -o comparison.html
+uv run python benchmarks/plot_dashboard.py --stages stage-0-vllm stage-1-vllm stage-2-vllm stage-0-custom stage-1-custom stage-2-custom stage-3-custom -o comparison.html
 ```
 
 Open the generated HTML file in a browser. By default, the dashboard is saved to `benchmarks/results/dashboard.html`; when using `-o`, check the path supplied to that option.
