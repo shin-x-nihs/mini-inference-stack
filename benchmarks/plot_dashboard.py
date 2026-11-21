@@ -122,7 +122,7 @@ def canonical_kernel_info(
         return (f"{p} SwiGLU Activation", f"{p} SwiGLU", False, p_offset + 5)
     if "rope" in lbl or "rotary" in lbl:
         return (f"{p} RoPE Embedding", f"{p} RoPE", False, p_offset + 6)
-    if "reshape_and_cache" in lbl or "cache" in lbl:
+    if "reshape_and_cache" in lbl or "reshape_and_cache" in raw or "cache" in lbl:
         return (f"{p} KV Cache Write", f"{p} KV Cache", False, p_offset + 7)
     return (label, label, False, p_offset + 50)
 

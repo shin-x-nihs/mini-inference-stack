@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import importlib.util
 import re
 import sys
@@ -20,6 +21,12 @@ _DTYPE_MAP: dict[str, torch.dtype] = {
     "float16": torch.float16,
     "float32": torch.float32,
 }
+
+_EXTRA_STAGE4_PROMPTS: tuple[str, ...] = (
+    "Write a Python function that reverses a list in place.",
+    "Implement a Python class for an LRU cache using collections.OrderedDict with get and put methods and type annotations.",
+    "Write a complete Python script that implements binary search on a sorted list of integers, includes docstrings explaining time and space complexity, and runs unit tests verifying edge cases such as empty lists, single-element lists, and duplicate values.",
+)
 
 
 def _stage_sort_key(stage_dir: Path) -> tuple[int, str]:
@@ -114,6 +121,30 @@ def _default_attn_impl(stage_dir: Path) -> str:
     return "eager" if _stage_sort_key(stage_dir)[0] < 2 else "sdpa"
 
 
+async def _run_with_scheduler(engine: object, work_coro: object) -> object:
+    sched_task = asyncio.create_task(engine.run_scheduler_loop())  # type: ignore[attr-defined]
+    work_task = asyncio.create_task(work_coro)  # type: ignore[arg-type]
+    try:
+        done, _ = await asyncio.wait(
+            {work_task, sched_task},
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if sched_task in done and work_task not in done:
+            work_task.cancel()
+            await asyncio.gather(work_task, return_exceptions=True)
+            exc = sched_task.exception()
+            if exc is not None:
+                raise exc
+            raise RuntimeError(
+                "Scheduler loop exited unexpectedly before work completed."
+            )
+        return await work_task
+    finally:
+        engine.stop()  # type: ignore[attr-defined]
+        sched_task.cancel()
+        await asyncio.gather(sched_task, return_exceptions=True)
+
+
 def _compute_hf_reference(
     model_name: str,
     torch_dtype: torch.dtype,
@@ -123,7 +154,8 @@ def _compute_hf_reference(
     num_tokens: int,
     pad_token_id: int | None,
     attn_impl: str,
-) -> tuple[torch.Tensor, list[int]]:
+    extra_prompt_ids_list: list[list[int]] | None = None,
+) -> tuple[torch.Tensor, list[int], list[list[int]]]:
     hf_model = (
         AutoModelForCausalLM.from_pretrained(
             model_name,
@@ -153,11 +185,27 @@ def _compute_hf_reference(
                 generation_config=gen_cfg,
             )
 
+            extra_hf_ids: list[list[int]] = []
+            if extra_prompt_ids_list:
+                for extra_ids in extra_prompt_ids_list:
+                    extra_tensor = torch.tensor(
+                        [extra_ids], dtype=torch.long, device=device
+                    )
+                    extra_out = hf_model.generate(
+                        extra_tensor,
+                        generation_config=gen_cfg,
+                    )
+                    e_ids: list[int] = extra_out[0, len(extra_ids) :].tolist()
+                    assert len(e_ids) == num_tokens, (
+                        f"Expected {num_tokens} extra HF ({attn_impl}) tokens, got {len(e_ids)}"
+                    )
+                    extra_hf_ids.append(e_ids)
+
         hf_ids: list[int] = hf_out[0, prompt_len:].tolist()
         assert len(hf_ids) == num_tokens, (
             f"Expected {num_tokens} HF ({attn_impl}) tokens, got {len(hf_ids)}"
         )
-        return hf_prefill_logits, hf_ids
+        return hf_prefill_logits, hf_ids, extra_hf_ids
     finally:
         del hf_model
         torch.cuda.empty_cache()
@@ -206,13 +254,34 @@ def run_parity(
         )
         for stage_dir in stage_dirs
     }
+    needs_extra_batch_refs = any(
+        _stage_sort_key(d)[0] >= 4
+        or "BlockAllocator" in (d / "engine.py").read_text(encoding="utf-8")
+        for d in stage_dirs
+    )
+    extra_prompt_ids_list: list[list[int]] = []
+    if needs_extra_batch_refs:
+        # Build 3 extra prompts of distinct lengths (~18, ~45, ~90 tokens)
+        short_raw_ids = tokenizer.encode(_EXTRA_STAGE4_PROMPTS[0], add_special_tokens=False)
+        for idx, extra_text in enumerate(_EXTRA_STAGE4_PROMPTS):
+            if idx == 0 and len(short_raw_ids) >= 8:
+                extra_prompt_ids_list.append(short_raw_ids)
+            else:
+                extra_fmt = tokenizer.apply_chat_template(
+                    [{"role": "user", "content": extra_text}],
+                    tokenize=False,
+                    add_generation_prompt=True,
+                )
+                extra_prompt_ids_list.append(
+                    tokenizer.encode(extra_fmt, add_special_tokens=False)
+                )
 
     print(f"Model:        {model_name} ({dtype_str})")
     print(f"Prompt chars: {len(prompt_text)} | Prompt tokens: {len(prompt_ids)}")
     print(f"Stages:       {[d.name for d in stage_dirs]}")
 
     # 1. Compute each required HuggingFace reference once before loading custom stages.
-    hf_refs: dict[str, tuple[torch.Tensor, list[int]]] = {}
+    hf_refs: dict[str, tuple[torch.Tensor, list[int], list[list[int]]]] = {}
     for impl_name in dict.fromkeys(stage_impls.values()):
         hf_refs[impl_name] = _compute_hf_reference(
             model_name=model_name,
@@ -223,69 +292,112 @@ def run_parity(
             num_tokens=num_tokens,
             pad_token_id=tokenizer.eos_token_id,
             attn_impl=impl_name,
+            extra_prompt_ids_list=extra_prompt_ids_list if needs_extra_batch_refs else None,
         )
 
     # 2. Evaluate each requested custom stage sequentially
     for stage_dir in stage_dirs:
         stage_name = stage_dir.name
         impl_name = stage_impls[stage_dir]
-        hf_prefill_logits, hf_ids = hf_refs[impl_name]
+        hf_prefill_logits, hf_ids, extra_hf_ids = hf_refs[impl_name]
         print(f"\n--- Verifying {stage_name} ---")
         print(f"[{stage_name}] Reference: HuggingFace attn_implementation={impl_name}")
         model_mod, engine_mod = load_stage_modules(stage_dir)
         Qwen2Model = model_mod.Qwen2Model
         NaiveEngine = engine_mod.NaiveEngine
+        is_paged_stage = hasattr(engine_mod, "BlockAllocator")
 
         engine = None
         try:
-            engine = NaiveEngine(
-                model_name=model_name,
-                dtype=dtype_str,
-                device=device,
-            )
+            if is_paged_stage:
+                engine = NaiveEngine(
+                    model_name=model_name,
+                    dtype=dtype_str,
+                    device=device,
+                    num_blocks=256,
+                )
+            else:
+                engine = NaiveEngine(
+                    model_name=model_name,
+                    dtype=dtype_str,
+                    device=device,
+                )
             assert isinstance(engine.model, Qwen2Model), (
                 f"[{stage_name}] Expected engine.model to be an instance of "
                 f"{Qwen2Model}, got {type(engine.model)}"
             )
 
-            with torch.inference_mode():
-                out = engine.model(input_tensor, last_token_only=True)
-
-            if isinstance(out, tuple):
-                logits_tensor, kv = out
-                model_config = engine.model.config
-                assert isinstance(kv, (list, tuple)), (
-                    f"[{stage_name}] Expected KV cache list/tuple, got {type(kv)}"
+            if is_paged_stage:
+                allocator = engine.allocator
+                assert allocator.num_free_blocks == allocator.num_blocks, (
+                    f"[{stage_name}] Expected {allocator.num_blocks} free blocks initially, "
+                    f"got {allocator.num_free_blocks}"
                 )
-                assert len(kv) == model_config.num_hidden_layers, (
-                    f"[{stage_name}] Expected {model_config.num_hidden_layers} KV layers, "
-                    f"got {len(kv)}"
+                needed_blocks = allocator.blocks_needed_for(len(prompt_ids))
+                allocated_blocks = allocator.allocate(needed_blocks)
+                try:
+                    block_table = torch.tensor(
+                        [allocated_blocks], dtype=torch.int32, device=device
+                    )
+                    context_lengths = torch.tensor(
+                        [len(prompt_ids)], dtype=torch.int32, device=device
+                    )
+                    with torch.inference_mode():
+                        logits_tensor = engine.model(
+                            input_tensor,
+                            kv_cache=allocator.kv_cache,
+                            block_table=block_table,
+                            context_lengths=context_lengths,
+                            last_token_only=True,
+                            max_context_len=len(prompt_ids),
+                        )
+                    custom_prefill_logits = logits_tensor[:, -1, :].float().cpu()
+                    del logits_tensor
+                finally:
+                    allocator.free(allocated_blocks)
+                assert allocator.num_free_blocks == allocator.num_blocks, (
+                    f"[{stage_name}] Expected all {allocator.num_blocks} blocks free after "
+                    f"prefill check, got {allocator.num_free_blocks}"
                 )
-                expected_kv_shape = (
-                    1,
-                    model_config.num_key_value_heads,
-                    len(prompt_ids),
-                    model_config.head_dim,
-                )
-                for layer_idx, layer_kv in enumerate(kv):
-                    assert isinstance(layer_kv, tuple) and len(layer_kv) == 2, (
-                        f"[{stage_name}] Layer {layer_idx} KV entry must be a (k, v) tuple"
-                    )
-                    k, v = layer_kv
-                    assert tuple(k.shape) == expected_kv_shape, (
-                        f"[{stage_name}] Layer {layer_idx} k shape {tuple(k.shape)} "
-                        f"!= {expected_kv_shape}"
-                    )
-                    assert tuple(v.shape) == expected_kv_shape, (
-                        f"[{stage_name}] Layer {layer_idx} v shape {tuple(v.shape)} "
-                        f"!= {expected_kv_shape}"
-                    )
-                del kv
             else:
-                logits_tensor = out
+                with torch.inference_mode():
+                    out = engine.model(input_tensor, last_token_only=True)
 
-            custom_prefill_logits = logits_tensor[:, -1, :].float().cpu()
-            del logits_tensor, out
+                if isinstance(out, tuple):
+                    logits_tensor, kv = out
+                    model_config = engine.model.config
+                    assert isinstance(kv, (list, tuple)), (
+                        f"[{stage_name}] Expected KV cache list/tuple, got {type(kv)}"
+                    )
+                    assert len(kv) == model_config.num_hidden_layers, (
+                        f"[{stage_name}] Expected {model_config.num_hidden_layers} KV layers, "
+                        f"got {len(kv)}"
+                    )
+                    expected_kv_shape = (
+                        1,
+                        model_config.num_key_value_heads,
+                        len(prompt_ids),
+                        model_config.head_dim,
+                    )
+                    for layer_idx, layer_kv in enumerate(kv):
+                        assert isinstance(layer_kv, tuple) and len(layer_kv) == 2, (
+                            f"[{stage_name}] Layer {layer_idx} KV entry must be a (k, v) tuple"
+                        )
+                        k, v = layer_kv
+                        assert tuple(k.shape) == expected_kv_shape, (
+                            f"[{stage_name}] Layer {layer_idx} k shape {tuple(k.shape)} "
+                            f"!= {expected_kv_shape}"
+                        )
+                        assert tuple(v.shape) == expected_kv_shape, (
+                            f"[{stage_name}] Layer {layer_idx} v shape {tuple(v.shape)} "
+                            f"!= {expected_kv_shape}"
+                        )
+                    del kv
+                else:
+                    logits_tensor = out
+
+                custom_prefill_logits = logits_tensor[:, -1, :].float().cpu()
+                del logits_tensor, out
 
             max_abs_logit_diff = float(
                 (hf_prefill_logits - custom_prefill_logits).abs().max().item()
@@ -299,14 +411,32 @@ def run_parity(
                 f"exceeded tolerance {logit_tol}"
             )
 
-            custom_ids = list(
-                engine.generate_tokens(
-                    prompt_ids,
-                    max_tokens=num_tokens,
-                    temperature=0.0,
-                    ignore_eos=True,
+            if is_paged_stage:
+                async def _run_single_async() -> list[int]:
+                    return await _run_with_scheduler(
+                        engine,
+                        engine.generate_tokens_async(
+                            prompt_ids,
+                            max_tokens=num_tokens,
+                            temperature=0.0,
+                            ignore_eos=True,
+                        ),
+                    )  # type: ignore[return-value]
+
+                custom_ids = asyncio.run(_run_single_async())
+                assert engine.allocator.num_free_blocks == engine.allocator.num_blocks, (
+                    f"[{stage_name}] Expected all {engine.allocator.num_blocks} blocks free "
+                    f"after single-request generation, got {engine.allocator.num_free_blocks}"
                 )
-            )
+            else:
+                custom_ids = list(
+                    engine.generate_tokens(
+                        prompt_ids,
+                        max_tokens=num_tokens,
+                        temperature=0.0,
+                        ignore_eos=True,
+                    )
+                )
 
             assert len(custom_ids) == num_tokens, (
                 f"[{stage_name}] Expected {num_tokens} custom tokens, got {len(custom_ids)}"
@@ -336,6 +466,59 @@ def run_parity(
             )
             print(f"[{stage_name}] Token IDs: {custom_ids}")
             print(f"[{stage_name}] Decoded output:\n{decoded_output}")
+
+            if is_paged_stage:
+                batch_prompt_ids = [prompt_ids, *extra_prompt_ids_list]
+                batch_hf_refs = [hf_ids, *extra_hf_ids]
+                prompt_lens = [len(p) for p in batch_prompt_ids]
+                print(
+                    f"[{stage_name}] Verifying concurrent B={len(batch_prompt_ids)} "
+                    f"heterogeneous-length batched parity (prompt lengths={prompt_lens})..."
+                )
+
+                async def _run_batched_async() -> list[list[int]]:
+                    async def _gather_all() -> list[list[int]]:
+                        return list(
+                            await asyncio.gather(
+                                *(
+                                    engine.generate_tokens_async(
+                                        p_ids,
+                                        max_tokens=num_tokens,
+                                        temperature=0.0,
+                                        ignore_eos=True,
+                                    )
+                                    for p_ids in batch_prompt_ids
+                                )
+                            )
+                        )
+
+                    return await _run_with_scheduler(engine, _gather_all())  # type: ignore[return-value]
+
+                batched_outputs = asyncio.run(_run_batched_async())
+                assert engine.allocator.num_free_blocks == engine.allocator.num_blocks, (
+                    f"[{stage_name}] Expected all {engine.allocator.num_blocks} blocks free "
+                    f"after B={len(batch_prompt_ids)} batched generation, got "
+                    f"{engine.allocator.num_free_blocks}"
+                )
+                for req_idx, (b_ids, ref_ids, p_len) in enumerate(
+                    zip(batched_outputs, batch_hf_refs, prompt_lens)
+                ):
+                    assert len(b_ids) == num_tokens, (
+                        f"[{stage_name}] Request {req_idx} (len={p_len}) expected "
+                        f"{num_tokens} tokens, got {len(b_ids)}"
+                    )
+                    if b_ids != ref_ids:
+                        raise AssertionError(
+                            f"[{stage_name}] Concurrent B={len(batch_prompt_ids)} parity failed "
+                            f"on request {req_idx} (prompt_len={p_len}): "
+                            f"custom={b_ids} != hf={ref_ids}"
+                        )
+                print(
+                    f"[{stage_name}] PASS: Concurrent B={len(batch_prompt_ids)} heterogeneous "
+                    f"batched parity (32/32 greedy tokens x {len(batch_prompt_ids)} requests) "
+                    f"and 100% block reclamation ({engine.allocator.num_free_blocks}/"
+                    f"{engine.allocator.num_blocks} free) verified!"
+                )
         finally:
             if engine is not None:
                 del engine
@@ -355,7 +538,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=str,
         default="all",
         help="Stage directory name under custom-serving/ (e.g. stage-0-baseline, "
-        "stage-1-kv-cache, stage-2-tiled-attn, stage-3-split-k) or 'all' (default: all).",
+        "stage-1-kv-cache, stage-2-tiled-attn, stage-3-split-k, stage-4-paged-kv) "
+        "or 'all' (default: all).",
     )
     parser.add_argument(
         "--num-tokens",

@@ -619,3 +619,13 @@ However, end-to-end decode step latency only moved from `25.19 ms` to `24.11 ms`
 * `benchmarks/results/stage-3-custom/nsys_metrics.json`
 * `benchmarks/results/stage-3-custom/ncu_metrics.json`
 * `benchmarks/results/dashboard.html`
+
+---
+
+### Stage 4 (Custom): Paged KV Cache & Continuous Batching (`stage-4-custom`) — Pending Benchmarks
+
+*Server directory: `custom-serving/stage-4-paged-kv/` | Benchmark stage: `stage-4-custom`*
+
+#### 1. Motivation & Expected Hardware Impact
+* **Eliminating Serialized Concurrency (`asyncio.Lock` $\to$ Iteration-Level Continuous Batching):** In Stages 1–3, concurrent requests were serialized behind a global `asyncio.Lock`, pinning aggregate Pareto (Plot 1) throughput flat at **~37–48 tok/s** across $C=1\text{--}16$ while decode linear projections remained strictly memory-bandwidth-bound $M = 1$ GEMVs (`93.98 µs`, $\text{AI} = 1.015\text{ FLOP/B}$, `293.38 GB/s` DRAM in Stage 3). Coalescing concurrent decode requests into a single batched forward pass turns $M = 1$ GEMVs into $M = B$ batched GEMMs, reusing weight tiles across $B$ active sequences and unlocking multi-request throughput scaling on Plot 1.
+* **Eliminating Contiguous KV Reallocation (`torch.cat` / `CatArrayBatchedCopy` $\to$ Triton `_reshape_and_cache`):** In Stage 3 Layer 0 NCU profiling, appending a single token via `torch.cat((past_k, k), dim=2)` launched `CatArrayBatchedCopy` (`Decode KV Cache Write`), consuming **`24.64 µs`** at **`42.79 GB/s`** to reallocate and copy the entire growing KV history on every step. Pre-allocating a fixed-size paged block pool (`BlockAllocator`, `KV_BLOCK_SIZE = 16`) and scattering new K/V tokens in-place via Triton `_reshape_and_cache` eliminates $O(S)$ KV copy traffic and contiguous memory fragmentation while supporting heterogeneous sequence lengths without batch padding waste.
