@@ -14,23 +14,23 @@ TEXT_MAIN = "#ffffff"
 TEXT_MUTED = "#a0a0a0"
 
 # --- Track-Aware Progressive Palettes (Dark Theme) ---
-# Custom Track: Warm Crimson -> Coral/Orange -> Amber -> Gold progression
+# Custom Track: Semantic optimization heatmap (Crimson -> Orange -> Gold -> Lime -> Emerald -> Cream)
 CUSTOM_TRACK_COLORS = [
     "#ff2a2a",  # Stage 0: Pure Crimson Red
-    "#ff8c42",  # Stage 1: Vibrant Tangerine / Coral Orange
-    "#ffd166",  # Stage 2: Warm Amber Gold
-    "#f4a261",  # Stage 3: Sandy Gold
-    "#ff5d8f",  # Stage 4: Electric Rose
-    "#fff3b0",  # Stage 5: Pale Cream Gold
+    "#ff7b00",  # Stage 1: Molten Orange
+    "#ffd60a",  # Stage 2: Solar Gold
+    "#a3e635",  # Stage 3: Electric Lime
+    "#10b981",  # Stage 4: Emerald Green
+    "#fff3b0",  # Stage 5: Warm Cream
 ]
 
-# vLLM Reference Track: Cool Ice White -> Electric Sky Cyan -> Mint Teal -> Violet
+# vLLM Reference Track: Cool Ice Silver -> Sky Cyan -> Cobalt -> Lavender -> Orchid
 VLLM_TRACK_COLORS = [
-    "#e2e8f0",  # Stage 0: Crisp Ice White / Silver
+    "#e2e8f0",  # Stage 0: Crisp Ice Silver
     "#38bdf8",  # Stage 1: Electric Sky Cyan
-    "#2dd4bf",  # Stage 2: Bright Mint Teal
+    "#3b82f6",  # Stage 2: Cobalt Blue
     "#a78bfa",  # Stage 3: Soft Lavender Violet
-    "#818cf8",  # Stage 4: Periwinkle Indigo
+    "#e879f9",  # Stage 4: Orchid
 ]
 
 OTHER_TRACK_COLORS = [
@@ -560,6 +560,28 @@ def build_plot4_roofline(stages: list[dict], active_track: str) -> tuple[go.Figu
     return fig, controls_html, json.dumps(js_stage_kernels)
 
 
+def _compact_num(
+    val: float,
+    int_at: float = 1000.0,
+    one_dec_at: float = 100.0,
+    small_dec: int = 2,
+) -> str:
+    """Format numeric table values compactly as magnitude grows."""
+    av = abs(val)
+    if av >= int_at:
+        return f"{val:.0f}"
+    if av >= one_dec_at:
+        return f"{val:.1f}"
+    return f"{val:.{small_dec}f}"
+
+
+def _compact_count(count: int) -> str:
+    """Format large kernel/call counts cleanly using a k-suffix when >= 1,000."""
+    if count >= 1000:
+        return f"{count / 1000.0:.1f}k"
+    return str(count)
+
+
 def build_tables_html(stages: list[dict]) -> str:
     # Stages are already sorted by (track_order, stage_num, name)
     # Table A: Nsight Systems Timeline Overview
@@ -575,22 +597,25 @@ def build_tables_html(stages: list[dict]) -> str:
 
         wall_ms = n.get("wall_time_ms", 0.0)
         num_k = n.get("num_kernels")
-        wall_sub = f' <span class="sub">({num_k:,} kernels)</span>' if num_k is not None else ""
+        wall_sub = f' <span class="sub">({_compact_count(num_k)} kernels)</span>' if num_k is not None else ""
 
         act_pct = n.get("gpu_active_pct", 0.0)
         act_ms = n.get("gpu_active_ms")
-        act_sub = f' <span class="sub">({act_ms:.1f} ms)</span>' if act_ms is not None else ""
+        act_sub = f' <span class="sub">({_compact_num(act_ms, 100.0, 10.0, 1)}ms)</span>' if act_ms is not None else ""
 
         idle_pct = n.get("gpu_idle_pct", 0.0)
         idle_ms = n.get("gpu_idle_ms")
-        idle_sub = f' <span class="sub">({idle_ms:.1f} ms)</span>' if idle_ms is not None else ""
+        idle_sub = f' <span class="sub">({_compact_num(idle_ms, 100.0, 10.0, 1)}ms)</span>' if idle_ms is not None else ""
 
         launch_ms = n.get("cpu_launch_overhead_ms")
         if launch_ms is not None:
             calls = n.get("cpu_launch_calls", 0)
             graphs = n.get("cuda_graph_launches", 0)
-            sub_parts = [f"{calls:,} calls"] + ([f"{graphs} graphs"] if graphs else [])
-            launch_cell = f'{launch_ms:.2f} ms <span class="sub">({", ".join(sub_parts)})</span>'
+            sub_parts = [f"{_compact_count(calls)} calls"] + ([f"{graphs} graphs"] if graphs else [])
+            launch_cell = (
+                f'{_compact_num(launch_ms, 100.0, 10.0, 1)} ms '
+                f'<span class="sub">({", ".join(sub_parts)})</span>'
+            )
         else:
             launch_cell = "-"
 
@@ -602,23 +627,19 @@ def build_tables_html(stages: list[dict]) -> str:
 
         dec_step = n.get("decode_step_avg_ms", 0.0)
         dec_tot = n.get("decode_total_ms")
-        dec_sub = f' <span class="sub">({dec_tot:.1f} ms)</span>' if dec_tot is not None else ""
+        dec_sub = f' <span class="sub">({_compact_num(dec_tot, 100.0, 10.0, 1)}ms)</span>' if dec_tot is not None else ""
 
         kb = n.get("kernel_time_breakdown")
         if kb:
             lin_p = kb.get("linear_pct", 0.0)
             att_p = kb.get("attention_pct", 0.0)
             oth_p = kb.get("norm_act_other_pct", 0.0)
-            lin_m = kb.get("linear_ms", 0.0)
-            att_m = kb.get("attention_ms", 0.0)
-            oth_m = kb.get("norm_act_other_ms", 0.0)
-            if s["track"] == "custom":
-                ms_str = f"({int(lin_m)} / {int(att_m)} / {int(oth_m)} ms)"
-            else:
-                ms_str = f"({lin_m:.1f} / {att_m:.1f} / {oth_m:.1f} ms)"
+            lin_m = _compact_num(kb.get("linear_ms", 0.0), 10.0, 10.0, 1)
+            att_m = _compact_num(kb.get("attention_ms", 0.0), 10.0, 10.0, 1)
+            oth_m = _compact_num(kb.get("norm_act_other_ms", 0.0), 10.0, 10.0, 1)
             kb_cell = (
-                f"{lin_p:.1f}% / {att_p:.1f}% / {oth_p:.1f}% "
-                f'<span class="sub">{ms_str}</span>'
+                f"{lin_p:.1f}/{att_p:.1f}/{oth_p:.1f}% "
+                f'<span class="sub">({lin_m}/{att_m}/{oth_m}ms)</span>'
             )
         else:
             kb_cell = "-"
@@ -626,13 +647,13 @@ def build_tables_html(stages: list[dict]) -> str:
         nsys_rows += f"""
         <tr class="{track_divider}">
             <td class="stage-cell"><span class="stage-dot" style="background:{s['color']};"></span>{s['name']}</td>
-            <td>{wall_ms:.2f}{wall_sub}</td>
+            <td>{_compact_num(wall_ms, 1000.0, 100.0, 1)}{wall_sub}</td>
             <td><span class="highlight-red">{act_pct:.1f}%</span>{act_sub}</td>
             <td>{idle_pct:.1f}%{idle_sub}</td>
             <td>{launch_cell}</td>
-            <td>{sync_ms:.2f}</td>
-            <td>{pref_ms:.2f} ms{pref_sub}</td>
-            <td>{dec_step:.2f} ms/step{dec_sub}</td>
+            <td>{_compact_num(sync_ms, 1000.0, 100.0, 2)}</td>
+            <td>{_compact_num(pref_ms, 1000.0, 100.0, 2)}{pref_sub}</td>
+            <td>{_compact_num(dec_step, 1000.0, 100.0, 2)}{dec_sub}</td>
             <td>{kb_cell}</td>
         </tr>"""
 
@@ -703,10 +724,10 @@ def build_tables_html(stages: list[dict]) -> str:
             data-core="{item['is_core']}">
             <td class="stage-cell"><span class="stage-dot" style="background:{stage_dot};"></span>{item['stage']}</td>
             <td>{phase_badge} {item['label']}</td>
-            <td>{item['exec_us']:.2f}</td>
-            <td>{item['dram_pct']:.1f}% <span class="sub">({item['dram_gbps']:.1f} GB/s)</span></td>
-            <td>{item['comp_pct']:.1f}% <span class="sub">({item['comp_tflops']:.2f} TFLOP/s)</span></td>
-            <td class="ai-cell">{item['ai']:.2f}</td>
+            <td>{_compact_num(item['exec_us'], 1000.0, 100.0, 2)}</td>
+            <td>{item['dram_pct']:.1f}% <span class="sub">({_compact_num(item['dram_gbps'], 10.0, 10.0, 1)} GB/s)</span></td>
+            <td>{item['comp_pct']:.1f}% <span class="sub">({_compact_num(item['comp_tflops'], 100.0, 10.0, 2)} TF/s)</span></td>
+            <td class="ai-cell">{_compact_num(item['ai'], 1000.0, 100.0, 2)}</td>
             <td>{item['warps']:.1f}%</td>
             <td>{item['regs']}</td>
             <td>{item['spills']}</td>
@@ -732,13 +753,13 @@ def build_tables_html(stages: list[dict]) -> str:
                     <tr>
                         <th>Stage</th>
                         <th>Wall Time (ms)</th>
-                        <th>GPU Active Time (%)</th>
-                        <th>GPU Idle (%)</th>
-                        <th>CPU Launch Overhead</th>
-                        <th>CUDA Sync (ms)</th>
-                        <th>Prefill Duration</th>
-                        <th>Decode Duration</th>
-                        <th>Kernel Time (Lin / Attn / Oth)</th>
+                        <th>GPU Active</th>
+                        <th>GPU Idle</th>
+                        <th>CPU Launch</th>
+                        <th>Sync (ms)</th>
+                        <th>Prefill (ms)</th>
+                        <th>Decode (ms/step)</th>
+                        <th>Kernel Split (Lin/Attn/Oth)</th>
                     </tr>
                 </thead>
                 <tbody>{nsys_rows or '<tr><td colspan="9">No nsys_metrics.json found</td></tr>'}</tbody>
@@ -766,14 +787,14 @@ def build_tables_html(stages: list[dict]) -> str:
                 <thead>
                     <tr>
                         <th>Stage</th>
-                        <th>Kernel Name</th>
-                        <th>Execution Time (us)</th>
-                        <th>DRAM Utilization (%)</th>
-                        <th>Compute Utilization (%)</th>
-                        <th>Arithmetic Intensity (FLOP/B)</th>
-                        <th>Active Warps (%)</th>
-                        <th>Registers / Thread</th>
-                        <th>Local Spills (B)</th>
+                        <th>Kernel</th>
+                        <th>Time (us)</th>
+                        <th>DRAM Util</th>
+                        <th>Compute Util</th>
+                        <th>AI (FLOP/B)</th>
+                        <th>Warps</th>
+                        <th>Regs</th>
+                        <th>Spills</th>
                     </tr>
                 </thead>
                 <tbody>{ncu_rows or '<tr><td colspan="9">No ncu_metrics.json found</td></tr>'}</tbody>
@@ -1073,11 +1094,11 @@ def generate_dashboard(stages: list[dict], output_path: Path):
             width: 100%;
             border-collapse: collapse;
             font-family: "JetBrains Mono", Consolas, monospace;
-            font-size: 12.5px;
+            font-size: 12px;
         }}
         th, td {{
             text-align: left;
-            padding: 10px 12px;
+            padding: 9px 9px;
             border-bottom: 1px solid #222222;
             white-space: nowrap;
         }}
@@ -1297,12 +1318,15 @@ def generate_dashboard(stages: list[dict], output_path: Path):
             const kernelMode = document.getElementById('roofline-kernel-select').value;
             const stageMode = document.getElementById('roofline-stage-select').value;
 
-            // Step 1: Filter kernels per stage, respecting current trace visibility and dropdown filters
-            const filteredByStage = ROOFLINE_STAGE_DATA.map((sObj, sIdx) => {{
+            // Step 1: Filter kernels per stage by UI controls only.
+            // Keep x/y populated even when a trace is hidden in the legend ('legendonly')
+            // so Plotly preserves its clickable legend item (matching Plots 1-3).
+            const isStageVisible = ROOFLINE_STAGE_DATA.map((_, sIdx) => {{
                 const traceObj = plotDiv.data ? plotDiv.data[sIdx + 1] : null;
-                const isTraceVisible = !traceObj || traceObj.visible === true || traceObj.visible === undefined;
-                if (!isTraceVisible) return [];
+                return !traceObj || traceObj.visible === true || traceObj.visible === undefined;
+            }});
 
+            const filteredByStage = ROOFLINE_STAGE_DATA.map((sObj) => {{
                 const matchStage = (stageMode === 'all') || (sObj.stage === stageMode);
                 if (!matchStage) return [];
 
@@ -1318,11 +1342,12 @@ def generate_dashboard(stages: list[dict], output_path: Path):
                 }});
             }});
 
-            // Step 2: Detect overlapping points across visible stages in log-space
-            // so we don't double-stamp text and can append "(×N)" on the top trace
+            // Step 2: Detect overlapping points only across currently visible stages in log-space
+            // so hidden ('legendonly') traces don't affect "(×N)" counts or steal text labels.
             const eps = 0.035; // ~8% log10 proximity threshold
             const clusters = [];
             filteredByStage.forEach((ks, sIdx) => {{
+                if (!isStageVisible[sIdx]) return;
                 ks.forEach((k, kIdx) => {{
                     const lx = Math.log10(k.x);
                     const ly = Math.log10(k.y);
@@ -1357,6 +1382,7 @@ def generate_dashboard(stages: list[dict], output_path: Path):
 
             filteredByStage.forEach((ks, sIdx) => {{
                 const sObj = ROOFLINE_STAGE_DATA[sIdx];
+                const traceVis = isStageVisible[sIdx];
                 traceIndices.push(sIdx + 1); // Trace 0 is the fixed Hardware Ceiling line
                 xs.push(ks.map(k => k.x));
                 ys.push(ks.map(k => k.y));
@@ -1367,13 +1393,20 @@ def generate_dashboard(stages: list[dict], output_path: Path):
                 const stageCdatas = [];
 
                 ks.forEach((k, kIdx) => {{
+                    const dispLabel = k.short_label || k.label;
+                    if (!traceVis) {{
+                        stageTextPos.push('top center');
+                        stageTexts.push(dispLabel);
+                        stageCdatas.push([k.phase, k.exec_us, k.dram_gbps, k.label, sObj.stage, sObj.track.toUpperCase()]);
+                        return;
+                    }}
+
                     const lx = Math.log10(k.x);
                     const ly = Math.log10(k.y);
                     const cluster = clusters.find(c => Math.abs(c.lx - lx) < eps && Math.abs(c.ly - ly) < eps);
                     const count = cluster ? cluster.members.length : 1;
                     const lastMember = cluster ? cluster.members[cluster.members.length - 1] : null;
                     const stageNames = cluster ? cluster.members.map(m => m.stage).join(' & ') : sObj.stage;
-                    const dispLabel = k.short_label || k.label;
 
                     stageTextPos.push(cluster ? cluster.textPos : 'top center');
 
@@ -1396,7 +1429,7 @@ def generate_dashboard(stages: list[dict], output_path: Path):
                 cdatas.push(stageCdatas);
             }});
 
-            Plotly.restyle(plotDiv, {{
+            return Plotly.restyle(plotDiv, {{
                 x: xs,
                 y: ys,
                 text: texts,
@@ -1466,8 +1499,9 @@ def generate_dashboard(stages: list[dict], output_path: Path):
                     if (evtData && evtData[0] && ('visible' in evtData[0])) {{
                         filteringRoof = true;
                         setTimeout(() => {{
-                            filterRooflinePlot();
-                            filteringRoof = false;
+                            Promise.resolve(filterRooflinePlot()).finally(() => {{
+                                filteringRoof = false;
+                            }});
                         }}, 20);
                     }}
                 }});
