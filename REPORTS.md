@@ -622,10 +622,73 @@ However, end-to-end decode step latency only moved from `25.19 ms` to `24.11 ms`
 
 ---
 
-### Stage 4 (Custom): Paged KV Cache & Continuous Batching (`stage-4-custom`) — Pending Benchmarks
+### Stage 4 (Custom): Paged KV Cache & Continuous Batching (`stage-4-custom`)
 
 *Server directory: `custom-serving/stage-4-paged-kv/` | Benchmark stage: `stage-4-custom`*
 
-#### 1. Motivation & Expected Hardware Impact
-* **Eliminating Serialized Concurrency (`asyncio.Lock` $\to$ Iteration-Level Continuous Batching):** In Stages 1–3, concurrent requests were serialized behind a global `asyncio.Lock`, pinning aggregate Pareto (Plot 1) throughput flat at **~37–48 tok/s** across $C=1\text{--}16$ while decode linear projections remained strictly memory-bandwidth-bound $M = 1$ GEMVs (`93.98 µs`, $\text{AI} = 1.015\text{ FLOP/B}$, `293.38 GB/s` DRAM in Stage 3). Coalescing concurrent decode requests into a single batched forward pass turns $M = 1$ GEMVs into $M = B$ batched GEMMs, reusing weight tiles across $B$ active sequences and unlocking multi-request throughput scaling on Plot 1.
-* **Eliminating Contiguous KV Reallocation (`torch.cat` / `CatArrayBatchedCopy` $\to$ Triton `_reshape_and_cache`):** In Stage 3 Layer 0 NCU profiling, appending a single token via `torch.cat((past_k, k), dim=2)` launched `CatArrayBatchedCopy` (`Decode KV Cache Write`), consuming **`24.64 µs`** at **`42.79 GB/s`** to reallocate and copy the entire growing KV history on every step. Pre-allocating a fixed-size paged block pool (`BlockAllocator`, `KV_BLOCK_SIZE = 16`) and scattering new K/V tokens in-place via Triton `_reshape_and_cache` eliminates $O(S)$ KV copy traffic and contiguous memory fragmentation while supporting heterogeneous sequence lengths without batch padding waste.
+#### 1. Motivation, Hypothesis, and Speedup Model
+* **Eliminating Serialized Concurrency (`asyncio.Lock` → Iteration-Level Continuous Batching):** In Stages 1–3, concurrent requests were serialized behind a global `asyncio.Lock`, pinning aggregate Pareto throughput flat at **38.67–44.98 tok/s** across $C=1\text{--}16$ while queueing TTFT ballooned to **`47,151.62 ms`** at $C=16$ and decode linear projections remained strictly memory-bandwidth-bound $M = 1$ GEMVs (`93.98 µs`, $\text{AI} = 1.015\text{ FLOP/B}$). Replacing `engine_lock` with an iteration-level scheduler (`PagedEngine.run_scheduler_loop`) that coalesces active requests into batched $M = B$ decode steps converts decode GEMVs into batched GEMMs, amortizing weight reads across $B$ active sequences and unlocking horizontal throughput scaling on Plot 1.
+* **Eliminating Contiguous KV Reallocation (`torch.cat` → Triton `_reshape_and_cache`):** Pre-allocating a fixed-size physical block pool (`BlockAllocator`, `KV_BLOCK_SIZE = 16`, `4,096` blocks) and scattering new K/V tokens in-place via Triton `_reshape_and_cache` eliminates Stage 3's $O(S)$ `CatArrayBatchedCopy` full-history KV copies (`24.64 µs` at `42.79 GB/s` in Layer 0 decode), removes contiguous memory fragmentation, and enables full `L=128..8192` context-sweep execution without padding waste.
+
+#### 2. Experiment Setup
+* **Hardware & Model:** NVIDIA GeForce RTX 5080 Laptop GPU (896.0 GB/s DRAM ceiling, 40.0 TFLOP/s BF16 Tensor Core ceiling), `Qwen/Qwen2.5-Coder-1.5B-Instruct` in `bfloat16`, `max_model_len = 9216`, `KV_BLOCK_SIZE = 16`, `num_blocks = 4096`, `max_batch_size = 64`.
+* **Workloads:**
+  * Concurrency sweep (`pareto_c{1,2,4,8,16,32,64}.json`, 512-in / 128-out)
+  * Context-length sweep (`context_l{128,256,512,1024,2048,4096,8192}.json`, C=1, 64-out)
+  * Nsight Systems & Nsight Compute (`1024-in / 64-out`, `C=1`, plus standalone Layer 0 `L=2048` Prefill / `M=1` Decode)
+
+#### 3. Benchmark Results (`stage-3-custom` & `stage-0-vllm` vs. `stage-4-custom`)
+
+| Sweep Point | `stage-3-custom` | `stage-4-custom` | `stage-0-vllm` (Ref) | Stage 4 vs. Stage 3 |
+| :--- | :--- | :--- | :--- | :--- |
+| **Pareto C=1** | **44.98 tok/s** (TPOT 21.93 ms, TTFT 60.02 ms) | 38.51 tok/s (TPOT 25.70 ms, TTFT 59.12 ms) | 87.77 tok/s (TPOT 10.90 ms) | -14.4% |
+| **Pareto C=2** | 43.02 tok/s (TTFT 2905.37 ms) | **72.14 tok/s** (TPOT 27.01 ms, TTFT 116.90 ms) | 169.46 tok/s (TPOT 10.98 ms) | **+67.7% (1.68×)** |
+| **Pareto C=4** | 43.11 tok/s (TTFT 8439.29 ms) | **163.71 tok/s** (TPOT 23.35 ms, TTFT 161.72 ms) | 353.74 tok/s (TPOT 10.15 ms) | **+279.7% (3.80×)** |
+| **Pareto C=8** | 41.96 tok/s (TTFT 20212.68 ms) | **290.94 tok/s** (TPOT 25.15 ms, TTFT 324.23 ms) | 561.94 tok/s (TPOT 12.27 ms) | **+593.4% (6.93×)** |
+| **Pareto C=16** | 38.67 tok/s (TTFT 47151.62 ms) | **525.85 tok/s** (TPOT 26.58 ms, TTFT 517.92 ms) | 831.19 tok/s (TPOT 16.08 ms) | **+1259.8% (13.60×)** |
+| **Pareto C=32** | *Omitted (serialized)* | **901.88 tok/s** (TPOT 28.97 ms, P99 ITL 44.72 ms) | 966.96 tok/s (TPOT 27.86 ms, P99 ITL 239.19 ms) | **93.3% of vLLM** |
+| **Pareto C=64** | *Omitted (serialized)* | **1260.39 tok/s** (TPOT 38.92 ms, P99 ITL 52.30 ms) | 1232.26 tok/s (TPOT 45.15 ms, P99 ITL 258.96 ms) | **102.3% of vLLM** |
+| **Context L=128** | 45.35 tok/s (TPOT 21.68 ms, TTFT 44.78 ms) | **46.58 tok/s** (TPOT 21.12 ms, TTFT 43.25 ms) | 89.04 tok/s (TPOT 10.67 ms) | **+2.7%** |
+| **Context L=256** | **49.07 tok/s** (TPOT 19.87 ms, TTFT 52.06 ms) | 46.25 tok/s (TPOT 21.15 ms, TTFT 50.61 ms) | 87.17 tok/s (TPOT 10.75 ms) | -5.7% |
+| **Context L=512** | 46.68 tok/s (TPOT 20.69 ms, TTFT 67.11 ms) | **48.12 tok/s** (TPOT 20.13 ms, TTFT 61.62 ms) | 89.40 tok/s (TPOT 10.09 ms) | **+3.1%** |
+| **Context L=1024** | 41.16 tok/s (TPOT 23.00 ms, TTFT 104.98 ms) | **42.78 tok/s** (TPOT 21.91 ms, TTFT 115.22 ms) | 95.23 tok/s (TPOT 8.99 ms) | **+3.9%** |
+| **Context L=2048** | **42.00 tok/s** (TPOT 21.15 ms, TTFT 190.76 ms) | 37.70 tok/s (TPOT 23.65 ms, TTFT 207.26 ms) | 75.68 tok/s (TPOT 10.11 ms) | -10.2% |
+| **Context L=4096** | — | **34.51 tok/s** (TPOT 22.75 ms, TTFT 420.80 ms) | 59.67 tok/s (TPOT 10.41 ms) | *New full-range point* |
+| **Context L=8192** | — | **28.95 tok/s** (TPOT 22.20 ms, TTFT 811.73 ms) | 50.95 tok/s (TPOT 9.24 ms) | *New full-range point* |
+
+All `stage-4-custom` sweep runs completed with `failed: 0`. Across the full `L=128..8192` context sweep at $C=1$, mean TPOT stays tightly bounded between `20.13 ms` and `23.65 ms/token` (`22.20 ms` at `L=8192`).
+
+#### 4. Profiler & Hardware Analysis
+
+##### Nsight Systems (`1024-in / 64-out`, `C=1`, NVTX-Measured)
+* **Decode Step Latency & Wall Time:** `decode_step_avg_ms` dropped from `24.11 ms` (`stage-3-custom`) to **`19.68 ms`** (`1518.62 ms` → `1240.13 ms` total decode), and overall `wall_time_ms` fell from `1870.56 ms` to **`1603.12 ms`** (`prefill_duration_ms = 326.94 ms`, `20.4%` of wall time). Host synchronization wait (`cuda_sync_wait_ms`) dropped `9.15×` from `51.08 ms` to **`5.58 ms`**.
+* **Launch Overhead & Remaining `CatArrayBatchedCopy`:** Total kernel launches dropped from `74,220` to **`72,933`** (`cuda_graph_launches = 0`), lifting GPU active utilization from `40.81%` to **`46.47%`**. However, **`669.98 ms` of `cpu_launch_overhead_ms`** still leaves the GPU idle **`53.53%` (`858.12 ms`)** of wall time at `C=1`. Moreover, while KV-cache `torch.cat` copies are **0** (all `1,792` KV writes execute via `_reshape_and_cache`), **`3,584` `CatArrayBatchedCopy` launches (`2 × 28 × 64`) persist from unfused `rotate_half` (`torch.cat((-x2, x1), dim=-1)`) inside RoPE**.
+
+##### Nsight Compute (Layer 0, `L=2048` Prefill & `M=1` Decode)
+* **Paged KV Cache Write (`_reshape_and_cache` vs. Stage 3 `CatArrayBatchedCopy`):**
+  * **Decode (`grid=(1, 2, 1)`, `block=(64, 1, 1)`):** Execution time dropped **4.61×** from `24.64 µs` (`42.79 GB/s`, `9.47%` DRAM SOL in Stage 3) to **`5.34 µs`** (`1.05 GB/s`, `0.24%` DRAM SOL, `0` spills), replacing $O(S)$ full-history reallocation with an $O(1)$ per-token scatter.
+  * **Prefill (`grid=(2048, 2, 1)`, `block=(64, 1, 1)`):** `14.27 µs`, `147.30 GB/s` (`32.58%` DRAM SOL, `49.19%` compute SOL, `74.67%` active warps, `18` registers/thread, `0` spills).
+* **Prefill & Decode Attention:**
+  * `Prefill Attention (_flash_attention_fwd, BLOCK_N=32)`: Improved from `970.75 µs` (`13.880 TFLOP/s`, `47.26%` compute SOL) in Stage 3 to **`847.90 µs`** (**`15.987 TFLOP/s`**, `40.0%` of `40.0 TFLOP/s` ceiling, `55.51%` compute SOL, AI `1607.656`).
+  * `Decode Attention (_flash_attention_decode_splitk_fwd, grid=(12, 15, 1))`: `33.92 µs` (`62.69 GB/s`, AI `7.407`, `0` spills) + `_flash_attention_splitk_combine`: `7.84 µs` (`41.76 µs` combined).
+* **Unfused Elementwise / Norm / Linear Baseline (`C=1` Launch Targets for Stage 5):**
+  * `Prefill Linear GEMM`: `2167.46 µs`, AI `1096.153`, `26.025 TFLOP/s` (`65.06%` of `40.0 TFLOP/s` ceiling; `90.80%` compute SOL).
+  * `Decode Linear GEMV` (`C=1`): `94.72 µs`, AI `1.015`, `291.10 GB/s` (`64.29%` DRAM SOL).
+  * Small unfused decode ops remain latency/launch-bound (`< 2%` DRAM SOL): `Decode Fused RMSNorm` (`7.62 µs`, `1.99%` DRAM SOL), `Decode RoPE Embedding` (`8.06 µs`, `0.85%` DRAM SOL), and `Decode SwiGLU Activation` (`6.37 µs`, `1.11%` DRAM SOL).
+
+#### 5. Conclusion & Stage 5 Handoff
+Stage 4 unlocked full continuous batching and paged memory management: aggregate throughput scaled **32.7×** from `C=1` (`38.51 tok/s`) to **`1,260.39 tok/s` at `C=64`**—**13.60×** over Stage 3 at `C=16` (`525.85` vs `38.67 tok/s`), **91×** lower `C=16` TTFT (`517.92 ms` vs `47,151.62 ms`), and **102.3% of `stage-0-vllm` (`1,232.26 tok/s`) at `C=64`** with `5×` tighter P99 ITL (`52.30 ms` vs `258.96 ms`). Meanwhile, Triton `_reshape_and_cache` cut Layer 0 decode KV-cache write latency **4.61×** (`24.64 µs` → `5.34 µs`) and enabled flat `~22 ms/tok` decode all the way to `L=8192`.
+
+The remaining gap at low concurrency (`19.68 ms/step` vs `10.67 ms/step` in vLLM) is now isolated cleanly to **operator fragmentation and CPU kernel-launch overhead** (`669.98 ms` across `72,932` launches, `53.53%` GPU idle time), specifically the `3,584` `CatArrayBatchedCopy` launches from unfused `rotate_half` RoPE plus separate PyTorch RMSNorm, residual-add, and SwiGLU launches—setting up **Stage 5 (`stage-5-fusion`: Operator Fusion + CUDA Graphs)** as the next targeted optimization.
+
+#### 6. Data Sources and Reproducibility
+* `benchmarks/results/stage-4-custom/pareto_c{1,2,4,8,16,32,64}.json`
+* `benchmarks/results/stage-4-custom/context_l{128,256,512,1024,2048,4096,8192}.json`
+* `benchmarks/results/stage-4-custom/nsys_metrics.json`
+* `benchmarks/results/stage-4-custom/ncu_metrics.json`
+* `benchmarks/results/dashboard.html`
+
+---
+
+### Stage 5 (Custom): Operator Fusion (`stage-5-fusion`) — Next Target
+* **Target Bottlenecks:** Eliminate the `3,584` `CatArrayBatchedCopy` launches from unfused `rotate_half` RoPE, fuse RMSNorm + residual addition and SwiGLU elementwise chains into custom Triton kernels, and evaluate CUDA Graphs to collapse the `669.98 ms` (`53.53%` GPU idle) dispatch bottleneck at `C=1`.

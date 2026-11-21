@@ -63,5 +63,5 @@ Replaces per-request contiguous `torch.cat` KV tensors and global `asyncio.Lock`
 - **Stage 1: KV Caching (`stage-1-kv-cache/`)** — Cache per-layer K and V tensors across decode steps to eliminate redundant sequence recomputation.
 - **Stage 2: Tiled Attention (`stage-2-tiled-attn/`)** — Tile prefill attention in SRAM to avoid materializing the full $S \times S$ attention matrix in HBM.
 - **Stage 3: Parallel Decode Attention (`stage-3-split-k/`)** — Split long-context KV reductions across thread blocks to improve SM occupancy during decode.
-- **Stage 4: Paged KV Cache & Continuous Batching (`stage-4-paged-kv/`)** — Store KV cache in fixed-size non-contiguous blocks and schedule iteration-level continuous batches to eliminate memory fragmentation and unlock batched decode GEMMs.
-- **Stage 5: Operator Fusion** — Fuse elementwise, normalization, and rotary kernels to reduce kernel-launch overhead and intermediate DRAM traffic.
+- **Stage 4: Paged KV Cache & Continuous Batching (`stage-4-paged-kv/`)** — Store KV cache in fixed-size non-contiguous blocks and schedule iteration-level continuous batches to eliminate memory fragmentation and unlock batched decode GEMMs (`1,260.39 tok/s` at $C=64$, `4.61×` faster Layer 0 decode KV write).
+- **Stage 5: Operator Fusion (`stage-5-fusion/`)** — Fuse `rotate_half` RoPE (eliminating the remaining `3,584` `CatArrayBatchedCopy` launches), RMSNorm + residual, and SwiGLU kernels, and evaluate CUDA Graphs to reduce `669.98 ms` of CPU launch overhead.
