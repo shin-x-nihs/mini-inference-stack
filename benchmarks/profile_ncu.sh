@@ -108,6 +108,7 @@ else
     if [[ "${IS_CUSTOM}" -eq 1 ]]; then
         cat << 'EOF' > "${RUNNER_PY}"
 from pathlib import Path
+import inspect
 import sys
 import torch
 import yaml
@@ -145,20 +146,82 @@ prompt_token_ids = (base_ids * reps)[:in_len]
 device = torch.device("cuda")
 model = model_mod.Qwen2Model.from_pretrained(model_name, dtype=torch_dtype, device=device)
 layer0 = model.layers[0]
+uses_paged_kv = "block_table" in inspect.signature(model.forward).parameters
+
+if uses_paged_kv:
+    block_size = getattr(model_mod, "KV_BLOCK_SIZE", 16)
+    max_seq_needed = max(65, in_len + 1)
+    num_blocks = ((max_seq_needed + block_size - 1) // block_size) + 2
+    cfg_obj = model.config
+    paged_kv_cache = [
+        torch.empty(
+            (2, num_blocks, block_size, cfg_obj.num_key_value_heads, cfg_obj.head_dim),
+            dtype=torch_dtype,
+            device=device,
+        )
+        for _ in range(cfg_obj.num_hidden_layers)
+    ]
+    paged_block_table = torch.arange(num_blocks, dtype=torch.int32, device=device).unsqueeze(0)
 
 # Unprofiled warmup (1 prefill + 1 decode step)
 warmup_ids = torch.tensor([prompt_token_ids[:64]], dtype=torch.long, device=device)
 with torch.inference_mode():
-    warm_out = model(warmup_ids, last_token_only=True)
-    if isinstance(warm_out, tuple):
-        warm_logits, warm_kv = warm_out
+    if uses_paged_kv:
+        warm_len = int(warmup_ids.shape[1])
+        warm_ctx = torch.tensor([warm_len], dtype=torch.int32, device=device)
+        warm_logits = model(
+            warmup_ids,
+            kv_cache=paged_kv_cache,
+            block_table=paged_block_table,
+            context_lengths=warm_ctx,
+            last_token_only=True,
+            max_context_len=warm_len,
+        )
         warm_next = torch.argmax(warm_logits[:, -1, :], dim=-1, keepdim=True)
-        _ = model(warm_next, past_key_values=warm_kv, last_token_only=True)
-        del warm_kv
+        warm_ctx_dec = torch.tensor([warm_len + 1], dtype=torch.int32, device=device)
+        _ = model(
+            warm_next,
+            kv_cache=paged_kv_cache,
+            block_table=paged_block_table,
+            context_lengths=warm_ctx_dec,
+            last_token_only=True,
+            max_context_len=warm_len + 1,
+        )
+        del warm_logits
+        if in_len >= 192:
+            warm_splitk_ids = torch.tensor([prompt_token_ids[:192]], dtype=torch.long, device=device)
+            warm_splitk_len = int(warm_splitk_ids.shape[1])
+            warm_splitk_ctx = torch.tensor([warm_splitk_len], dtype=torch.int32, device=device)
+            warm_splitk_logits = model(
+                warm_splitk_ids,
+                kv_cache=paged_kv_cache,
+                block_table=paged_block_table,
+                context_lengths=warm_splitk_ctx,
+                last_token_only=True,
+                max_context_len=warm_splitk_len,
+            )
+            warm_splitk_next = torch.argmax(warm_splitk_logits[:, -1, :], dim=-1, keepdim=True)
+            warm_splitk_ctx_dec = torch.tensor([warm_splitk_len + 1], dtype=torch.int32, device=device)
+            _ = model(
+                warm_splitk_next,
+                kv_cache=paged_kv_cache,
+                block_table=paged_block_table,
+                context_lengths=warm_splitk_ctx_dec,
+                last_token_only=True,
+                max_context_len=warm_splitk_len + 1,
+            )
+            del warm_splitk_logits
     else:
-        warm_next = torch.argmax(warm_out[:, -1, :], dim=-1, keepdim=True)
-        _ = model(torch.cat([warmup_ids, warm_next], dim=1), last_token_only=True)
-    del warm_out
+        warm_out = model(warmup_ids, last_token_only=True)
+        if isinstance(warm_out, tuple):
+            warm_logits, warm_kv = warm_out
+            warm_next = torch.argmax(warm_logits[:, -1, :], dim=-1, keepdim=True)
+            _ = model(warm_next, past_key_values=warm_kv, last_token_only=True)
+            del warm_kv
+        else:
+            warm_next = torch.argmax(warm_out[:, -1, :], dim=-1, keepdim=True)
+            _ = model(torch.cat([warmup_ids, warm_next], dim=1), last_token_only=True)
+        del warm_out
 torch.cuda.synchronize(device)
 
 pass_counter = {"count": 0, "active": False}
@@ -208,17 +271,41 @@ hooks = [
 
 input_ids = torch.tensor([prompt_token_ids], dtype=torch.long, device=device)
 with torch.inference_mode():
-    # Pass 0: Prefill (L=in_len)
-    out = model(input_ids, last_token_only=True)
-    # Pass 1: Decode (M=1 using returned past_key_values when supported)
-    if isinstance(out, tuple):
-        logits, past_kv = out
+    if uses_paged_kv:
+        # Pass 0: Prefill (L=in_len)
+        prof_ctx = torch.tensor([in_len], dtype=torch.int32, device=device)
+        logits = model(
+            input_ids,
+            kv_cache=paged_kv_cache,
+            block_table=paged_block_table,
+            context_lengths=prof_ctx,
+            last_token_only=True,
+            max_context_len=in_len,
+        )
+        # Pass 1: Decode (M=1 at in_len + 1)
         next_tok = torch.argmax(logits[:, -1, :], dim=-1, keepdim=True)
-        _ = model(next_tok, past_key_values=past_kv, last_token_only=True)
-        del past_kv
+        prof_ctx_dec = torch.tensor([in_len + 1], dtype=torch.int32, device=device)
+        _ = model(
+            next_tok,
+            kv_cache=paged_kv_cache,
+            block_table=paged_block_table,
+            context_lengths=prof_ctx_dec,
+            last_token_only=True,
+            max_context_len=in_len + 1,
+        )
+        del paged_kv_cache, paged_block_table
     else:
-        next_tok = torch.argmax(out[:, -1, :], dim=-1, keepdim=True)
-        _ = model(torch.cat([input_ids, next_tok], dim=1), last_token_only=True)
+        # Pass 0: Prefill (L=in_len)
+        out = model(input_ids, last_token_only=True)
+        # Pass 1: Decode (M=1 using returned past_key_values when supported)
+        if isinstance(out, tuple):
+            logits, past_kv = out
+            next_tok = torch.argmax(logits[:, -1, :], dim=-1, keepdim=True)
+            _ = model(next_tok, past_key_values=past_kv, last_token_only=True)
+            del past_kv
+        else:
+            next_tok = torch.argmax(out[:, -1, :], dim=-1, keepdim=True)
+            _ = model(torch.cat([input_ids, next_tok], dim=1), last_token_only=True)
 torch.cuda.synchronize(device)
 
 for h in hooks:
@@ -427,6 +514,8 @@ def classify_kernel(kname, phase, nvtx_txt=""):
         return f"{phase} Attention (Triton Split-K)"
     if "flash_attention" in kl or "_flash_attention_fwd" in kl:
         return f"{phase} Attention (Triton FlashAttention)"
+    if "reshape_and_cache" in kl or "catarraybatchedcopy" in kl:
+        return f"{phase} KV Cache Write"
     if "attn_compute" in nl:
         return f"{phase} Attention"
     if "rmsnorm_op" in nl:
@@ -456,8 +545,6 @@ def classify_kernel(kname, phase, nvtx_txt=""):
         return f"{phase} Fused RMSNorm"
     if "rope" in kl or "rotary" in kl or "neg_kernel" in kl:
         return f"{phase} RoPE Embedding"
-    if "reshape_and_cache" in kl or "catarraybatchedcopy" in kl:
-        return f"{phase} KV Cache Write"
     if "silu" in kl or "act_and_mul" in kl or "binaryfunctor" in kl:
         return f"{phase} SwiGLU Activation"
     return f"{phase} {kname[:28]}"

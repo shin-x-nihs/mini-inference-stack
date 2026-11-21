@@ -2,7 +2,7 @@
 
 A shared guide for running the inference server, checking functionality, benchmarking workloads, profiling GPU behavior, and comparing optimization stages across both project tracks:
 * **Reference track (`vllm-reference/`):** vLLM reference implementations (`stage-0-baseline`, `stage-1-spec-dec`, `stage-2-prefix-cache`).
-* **Custom track (`custom-serving/`):** Progressive from-scratch implementations (`stage-0-baseline`, `stage-1-kv-cache`, `stage-2-tiled-attn`).
+* **Custom track (`custom-serving/`):** Progressive from-scratch implementations (`stage-0-baseline`, `stage-1-kv-cache`, `stage-2-tiled-attn`, `stage-3-split-k`, `stage-4-paged-kv`).
 
 > **Core Principle:** Keep experiments repeatable—change one variable at a time and record the environment and settings.
 
@@ -81,13 +81,16 @@ In **Terminal 1**:
 
 # Or Custom Track Stage 3: Parallel Decode Attention (Triton Split-K)
 ./custom-serving/stage-3-split-k/serve.sh
+
+# Or Custom Track Stage 4: Paged KV Cache & Continuous Batching
+./custom-serving/stage-4-paged-kv/serve.sh
 ```
 
 Wait until the model has loaded and the server reports readiness. The reference API is available at `http://127.0.0.1:8000/v1`.
 
 For another implementation, start its documented server script. Keep the API interface and port consistent where practical so the same client and benchmark harness can be reused.
 
-> **Note on Stage Names:** Server directories are named by path (`vllm-reference/stage-0-baseline/`, `vllm-reference/stage-1-spec-dec/`, `vllm-reference/stage-2-prefix-cache/`, `custom-serving/stage-0-baseline/`, `custom-serving/stage-1-kv-cache/`, `custom-serving/stage-2-tiled-attn/`, and `custom-serving/stage-3-split-k/`), while runner and benchmark scripts take stage identifiers (`stage-0-vllm`, `stage-1-vllm`, `stage-2-vllm`, `stage-0-custom`, `stage-1-custom`, `stage-2-custom`, and `stage-3-custom`), which directly name the result folders under `benchmarks/results/<stage-name>/`.
+> **Note on Stage Names:** Server directories are named by path (`vllm-reference/stage-0-baseline/`, `vllm-reference/stage-1-spec-dec/`, `vllm-reference/stage-2-prefix-cache/`, `custom-serving/stage-0-baseline/`, `custom-serving/stage-1-kv-cache/`, `custom-serving/stage-2-tiled-attn/`, `custom-serving/stage-3-split-k/`, and `custom-serving/stage-4-paged-kv/`), while runner and benchmark scripts take stage identifiers (`stage-0-vllm`, `stage-1-vllm`, `stage-2-vllm`, `stage-0-custom`, `stage-1-custom`, `stage-2-custom`, `stage-3-custom`, and `stage-4-custom`), which directly name the result folders under `benchmarks/results/<stage-name>/`.
 
 ### Profiler-Ready Launch (Nsight Systems)
 
@@ -102,6 +105,7 @@ NSYS=ON ./custom-serving/stage-0-baseline/serve.sh
 NSYS=ON ./custom-serving/stage-1-kv-cache/serve.sh
 NSYS=ON ./custom-serving/stage-2-tiled-attn/serve.sh
 NSYS=ON ./custom-serving/stage-3-split-k/serve.sh
+NSYS=ON ./custom-serving/stage-4-paged-kv/serve.sh
 ```
 
 *Use this only if the implementation's launch script supports the `NSYS` option.*
@@ -181,6 +185,9 @@ In **Terminal 2**:
 
 # Benchmark Custom Stage 3
 ./benchmarks/bench_closed_loop.sh stage-3-custom
+
+# Benchmark Custom Stage 4
+./benchmarks/bench_closed_loop.sh stage-4-custom
 ```
 
 The standard closed-loop script runs two sweeps:
@@ -232,6 +239,7 @@ Nsight Systems captures the overall timeline: CPU activity, CUDA calls, GPU kern
   NSYS=ON ./custom-serving/stage-1-kv-cache/serve.sh
   NSYS=ON ./custom-serving/stage-2-tiled-attn/serve.sh
   NSYS=ON ./custom-serving/stage-3-split-k/serve.sh
+  NSYS=ON ./custom-serving/stage-4-paged-kv/serve.sh
   ```
 * **Terminal 2:** Run the profile:
   ```bash
@@ -243,6 +251,7 @@ Nsight Systems captures the overall timeline: CPU activity, CUDA calls, GPU kern
   ./benchmarks/profile_nsys.sh stage-1-custom
   ./benchmarks/profile_nsys.sh stage-2-custom
   ./benchmarks/profile_nsys.sh stage-3-custom
+  ./benchmarks/profile_nsys.sh stage-4-custom
   ```
 
 **Outputs:**
@@ -276,6 +285,7 @@ Nsight Compute examines selected kernels in more detail, including execution tim
   ./benchmarks/profile_ncu.sh stage-1-custom
   ./benchmarks/profile_ncu.sh stage-2-custom
   ./benchmarks/profile_ncu.sh stage-3-custom
+  ./benchmarks/profile_ncu.sh stage-4-custom
   ```
 
 For `stage-1-vllm` (or stages containing speculative decoding), the script automatically detects the draft model and profiles Target Layer 0 verification at batch size $M = K + 1$ (where $K$ is the number of drafted tokens) alongside Prefill. For standard vLLM and `stage-*-custom` stages, it profiles Layer 0 Prefill ($L=2048$) and single-token Decode ($M = 1$).
@@ -313,7 +323,7 @@ uv run python benchmarks/plot_dashboard.py
 uv run python benchmarks/plot_dashboard.py --stages stage-0-vllm
 
 # Compare stages
-uv run python benchmarks/plot_dashboard.py --stages stage-0-vllm stage-1-vllm stage-2-vllm stage-0-custom stage-1-custom stage-2-custom stage-3-custom -o comparison.html
+uv run python benchmarks/plot_dashboard.py --stages stage-0-vllm stage-1-vllm stage-2-vllm stage-0-custom stage-1-custom stage-2-custom stage-3-custom stage-4-custom -o comparison.html
 ```
 
 Open the generated HTML file in a browser. By default, the dashboard is saved to `benchmarks/results/dashboard.html`; when using `-o`, check the path supplied to that option.
@@ -403,7 +413,7 @@ The `custom-serving/` track reconstructs the historical evolution of LLM inferen
 * **Stage 1:** Adds Naive KV Cache (Requires Stage 0; solves the decode regression).
 * **Stage 2:** Adds Tiled / FlashAttention (Requires Stage 1; solves the prefill memory wall).
 * **Stage 3:** Adds Parallel Decode Attention / Split-K (Requires Stage 2; improves decode SM occupancy at long contexts).
-* **Stage 4:** Adds Paged KV Cache (Requires Stage 3; solves batching fragmentation).
+* **Stage 4:** Adds Paged KV Cache & Continuous Batching (Requires Stage 3; solves batching fragmentation and serialized decode).
 * **Stage 5:** Adds Operator Fusion (Requires Stage 4; reduces kernel-launch and intermediate memory traffic overhead).
 
 **Rule for Custom:** When creating `stage-(N)`, copy the code from `stage-(N-1)` and implement exactly one architectural upgrade on top of it.

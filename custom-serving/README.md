@@ -2,7 +2,7 @@
 
 From-scratch PyTorch/CUDA inference engines built **strictly additively**: each stage copies `stage-(N-1)` and implements one architectural upgrade on top of it.
 
-All stages serve `Qwen/Qwen2.5-Coder-1.5B-Instruct` (`bfloat16`) via an OpenAI-compatible `POST /v1/chat/completions` SSE endpoint on port `8000` (configured by root `config.yaml`), emit `prefill_step` / `decode_step` / `attn_compute` NVTX ranges for `benchmarks/profile_nsys.sh`, and support standalone Layer 0 kernel profiling via `benchmarks/profile_ncu.sh <stage-id>` (Stage 0 deferred NCU profiling since `nsys` timeline metrics already isolated full-sequence decode recomputation). Shared parity verification lives at `custom-serving/test_parity.py` (`--stage stage-0-baseline|stage-1-kv-cache|stage-2-tiled-attn|stage-3-split-k|all`), loading each stage's `model.py` and `engine.py` in isolation to verify single-step prefill logits and 100% greedy token ID parity against HuggingFace `AutoModelForCausalLM` (`eager` for Stages 0–1; `sdpa` for Stage 2+ fp32-accumulating kernels).
+All stages serve `Qwen/Qwen2.5-Coder-1.5B-Instruct` (`bfloat16`) via an OpenAI-compatible `POST /v1/chat/completions` SSE endpoint on port `8000` (configured by root `config.yaml`), emit `prefill_step` / `decode_step` / `attn_compute` NVTX ranges for `benchmarks/profile_nsys.sh`, and support standalone Layer 0 kernel profiling via `benchmarks/profile_ncu.sh <stage-id>` (Stage 0 deferred NCU profiling since `nsys` timeline metrics already isolated full-sequence decode recomputation). Shared parity verification lives at `custom-serving/test_parity.py` (`--stage stage-0-baseline|stage-1-kv-cache|stage-2-tiled-attn|stage-3-split-k|stage-4-paged-kv|all`), loading each stage's `model.py` and `engine.py` in isolation to verify single-step prefill logits and 100% greedy token ID parity against HuggingFace `AutoModelForCausalLM` (`eager` for Stages 0–1; `sdpa` for Stage 2+ fp32-accumulating kernels).
 
 ---
 
@@ -47,11 +47,21 @@ Eliminates single-token decode SM starvation (`S_q = 1`) by partitioning the KV 
 
 ---
 
+## Stage 4: Paged KV Cache & Continuous Batching (`stage-4-paged-kv/`)
+
+Replaces per-request contiguous `torch.cat` KV tensors and global `asyncio.Lock` request serialization with a physical block pool (`KV_BLOCK_SIZE = 16`) and an iteration-level continuous batching scheduler:
+
+- **`model.py`**: Introduces a Triton `_reshape_and_cache` kernel that scatters newly projected K and V tokens directly into non-contiguous physical pages (`[2, num_blocks, 16, num_kv_heads, head_dim]`) via a 0-padded `int32` `block_table` and per-sequence `context_lengths`, eliminating `torch.cat` (`CatArrayBatchedCopy`) full-history reallocations. Upgrades `_flash_attention_fwd` (prefill) and `_flash_attention_decode_splitk_fwd` (decode) to gather KV tiles indirectly through `block_table` with per-sequence causal bounds from `context_lengths` and per-row RoPE offsets during batched decode.
+- **`engine.py`**: Implements `BlockAllocator` (free-block deque + double-free guard) and `PagedEngine` (`NaiveEngine` alias) with an iteration-level continuous batching scheduler (`run_scheduler_loop`). Groups equal-length waiting prompts for zero-padding prefill admission, coalesces all active sequences into batched $M = B$ decode steps (shifting decode linear projections from memory-bound $M = 1$ GEMVs to higher-intensity batched GEMMs), performs a single batch `.tolist()` D2H sampling transfer per step, and supports recomputation preemption when free blocks are exhausted.
+- **`server.py` & `serve.sh`**: Lock-free async FastAPI/uvicorn serving snapshot (`stage4-gpu` executor thread, `CUSTOM_NUM_KV_BLOCKS=4096`, `CUSTOM_MAX_BATCH_SIZE=64`) that streams concurrent SSE requests directly through the background scheduler loop and reclaims KV blocks immediately on client disconnect.
+
+---
+
 ## Optimization Roadmap
 
 - **Stage 0: Naive PyTorch (`stage-0-baseline/`)** — Full-sequence recomputation, explicit `(Q @ K^T)` attention, serialized `asyncio.Lock` serving.
 - **Stage 1: KV Caching (`stage-1-kv-cache/`)** — Cache per-layer K and V tensors across decode steps to eliminate redundant sequence recomputation.
 - **Stage 2: Tiled Attention (`stage-2-tiled-attn/`)** — Tile prefill attention in SRAM to avoid materializing the full $S \times S$ attention matrix in HBM.
 - **Stage 3: Parallel Decode Attention (`stage-3-split-k/`)** — Split long-context KV reductions across thread blocks to improve SM occupancy during decode.
-- **Stage 4: Paged KV Cache (PagedAttention-style)** — Store KV cache in fixed-size non-contiguous blocks to eliminate memory fragmentation and support batching.
+- **Stage 4: Paged KV Cache & Continuous Batching (`stage-4-paged-kv/`)** — Store KV cache in fixed-size non-contiguous blocks and schedule iteration-level continuous batches to eliminate memory fragmentation and unlock batched decode GEMMs.
 - **Stage 5: Operator Fusion** — Fuse elementwise, normalization, and rotary kernels to reduce kernel-launch overhead and intermediate DRAM traffic.
