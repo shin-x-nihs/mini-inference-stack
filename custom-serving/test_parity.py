@@ -110,10 +110,64 @@ def load_stage_modules(stage_dir: Path) -> tuple[ModuleType, ModuleType]:
             sys.modules.pop("engine", None)
 
 
+def _default_attn_impl(stage_dir: Path) -> str:
+    return "eager" if _stage_sort_key(stage_dir)[0] < 2 else "sdpa"
+
+
+def _compute_hf_reference(
+    model_name: str,
+    torch_dtype: torch.dtype,
+    device: str,
+    input_tensor: torch.Tensor,
+    prompt_len: int,
+    num_tokens: int,
+    pad_token_id: int | None,
+    attn_impl: str,
+) -> tuple[torch.Tensor, list[int]]:
+    hf_model = (
+        AutoModelForCausalLM.from_pretrained(
+            model_name,
+            dtype=torch_dtype,
+            attn_implementation=attn_impl,
+            local_files_only=True,
+        )
+        .to(device)
+        .eval()
+    )
+    try:
+        with torch.inference_mode():
+            hf_prefill_logits = (
+                hf_model(input_tensor, use_cache=False).logits[:, -1, :].float().cpu()
+            )
+            gen_cfg = GenerationConfig(
+                do_sample=False,
+                max_new_tokens=num_tokens,
+                min_new_tokens=num_tokens,
+                repetition_penalty=1.0,
+                use_cache=(attn_impl == "sdpa"),
+                eos_token_id=None,
+                pad_token_id=pad_token_id,
+            )
+            hf_out = hf_model.generate(
+                input_tensor,
+                generation_config=gen_cfg,
+            )
+
+        hf_ids: list[int] = hf_out[0, prompt_len:].tolist()
+        assert len(hf_ids) == num_tokens, (
+            f"Expected {num_tokens} HF ({attn_impl}) tokens, got {len(hf_ids)}"
+        )
+        return hf_prefill_logits, hf_ids
+    finally:
+        del hf_model
+        torch.cuda.empty_cache()
+
+
 def run_parity(
     stage: str = "all",
     num_tokens: int = 32,
     logit_tol: float = 0.25,
+    attn_impl: str = "auto",
 ) -> None:
     stage_dirs = discover_stages(CUSTOM_SERVING_DIR, stage)
 
@@ -146,53 +200,38 @@ def run_parity(
     )
     input_tensor = torch.tensor([prompt_ids], dtype=torch.long, device=device)
 
+    stage_impls = {
+        stage_dir: (
+            _default_attn_impl(stage_dir) if attn_impl == "auto" else attn_impl
+        )
+        for stage_dir in stage_dirs
+    }
+
     print(f"Model:        {model_name} ({dtype_str})")
     print(f"Prompt chars: {len(prompt_text)} | Prompt tokens: {len(prompt_ids)}")
     print(f"Stages:       {[d.name for d in stage_dirs]}")
 
-    # 1. Reference: HuggingFace AutoModelForCausalLM with eager attention and no KV cache
-    hf_model = (
-        AutoModelForCausalLM.from_pretrained(
-            model_name,
-            dtype=torch_dtype,
-            attn_implementation="eager",
-            local_files_only=True,
-        )
-        .to(device)
-        .eval()
-    )
-
-    with torch.inference_mode():
-        hf_prefill_logits = (
-            hf_model(input_tensor, use_cache=False).logits[:, -1, :].float().cpu()
-        )
-        gen_cfg = GenerationConfig(
-            do_sample=False,
-            max_new_tokens=num_tokens,
-            min_new_tokens=num_tokens,
-            repetition_penalty=1.0,
-            use_cache=False,
-            eos_token_id=None,
+    # 1. Compute each required HuggingFace reference once before loading custom stages.
+    hf_refs: dict[str, tuple[torch.Tensor, list[int]]] = {}
+    for impl_name in dict.fromkeys(stage_impls.values()):
+        hf_refs[impl_name] = _compute_hf_reference(
+            model_name=model_name,
+            torch_dtype=torch_dtype,
+            device=device,
+            input_tensor=input_tensor,
+            prompt_len=len(prompt_ids),
+            num_tokens=num_tokens,
             pad_token_id=tokenizer.eos_token_id,
+            attn_impl=impl_name,
         )
-        hf_out = hf_model.generate(
-            input_tensor,
-            generation_config=gen_cfg,
-        )
-
-    hf_ids: list[int] = hf_out[0, len(prompt_ids) :].tolist()
-    del hf_out
-    del hf_model
-    torch.cuda.empty_cache()
-
-    assert len(hf_ids) == num_tokens, (
-        f"Expected {num_tokens} HF tokens, got {len(hf_ids)}"
-    )
 
     # 2. Evaluate each requested custom stage sequentially
     for stage_dir in stage_dirs:
         stage_name = stage_dir.name
+        impl_name = stage_impls[stage_dir]
+        hf_prefill_logits, hf_ids = hf_refs[impl_name]
         print(f"\n--- Verifying {stage_name} ---")
+        print(f"[{stage_name}] Reference: HuggingFace attn_implementation={impl_name}")
         model_mod, engine_mod = load_stage_modules(stage_dir)
         Qwen2Model = model_mod.Qwen2Model
         NaiveEngine = engine_mod.NaiveEngine
@@ -275,7 +314,7 @@ def run_parity(
 
             if custom_ids != hf_ids:
                 print(
-                    f"MISMATCH DETECTED between custom {stage_name} and HuggingFace eager:"
+                    f"MISMATCH DETECTED between custom {stage_name} and HuggingFace {impl_name}:"
                 )
                 for step_idx, (c_id, h_id) in enumerate(zip(custom_ids, hf_ids)):
                     marker = "==" if c_id == h_id else "!="
@@ -304,12 +343,12 @@ def run_parity(
 
 
 def test_greedy_parity() -> None:
-    run_parity(stage="all", num_tokens=32, logit_tol=0.25)
+    run_parity(stage="all", num_tokens=32, logit_tol=0.25, attn_impl="auto")
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Verify custom-serving stage(s) against HuggingFace eager reference."
+        description="Verify custom-serving stage(s) against HuggingFace reference."
     )
     parser.add_argument(
         "--stage",
@@ -330,6 +369,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=0.25,
         help="Maximum allowed single-step prefill abs logit diff (default: 0.25).",
     )
+    parser.add_argument(
+        "--attn-impl",
+        type=str,
+        choices=["auto", "eager", "sdpa"],
+        default="auto",
+        help="HuggingFace reference attn_implementation: 'auto' uses eager for "
+        "Stages 0-1 and sdpa for Stage 2+ (default: auto).",
+    )
     return parser.parse_args(argv)
 
 
@@ -339,4 +386,5 @@ if __name__ == "__main__":
         stage=args.stage,
         num_tokens=args.num_tokens,
         logit_tol=args.logit_tol,
+        attn_impl=args.attn_impl,
     )
