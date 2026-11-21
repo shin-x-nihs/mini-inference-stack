@@ -421,6 +421,8 @@ def get_duration_ns(row, units):
 def classify_kernel(kname, phase, nvtx_txt=""):
     kl = kname.lower()
     nl = (nvtx_txt or "").lower()
+    if "flash_attention" in kl or "_flash_attention_fwd" in kl:
+        return f"{phase} Attention (Triton FlashAttention)"
     if "attn_compute" in nl:
         return f"{phase} Attention"
     if "rmsnorm_op" in nl:

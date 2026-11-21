@@ -316,7 +316,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=str,
         default="all",
         help="Stage directory name under custom-serving/ (e.g. stage-0-baseline, "
-        "stage-1-kv-cache) or 'all' (default: all).",
+        "stage-1-kv-cache, stage-2-tiled-attn) or 'all' (default: all).",
     )
     parser.add_argument(
         "--num-tokens",

@@ -91,12 +91,15 @@ def padded_range(values: list[float], pad: float = 1.15) -> list[float]:
     return [0.0, max(valid) * pad] if valid else [0.0, 1.0]
 
 
-def canonical_kernel_info(label: str, phase: str) -> tuple[str, str, bool, int]:
+def canonical_kernel_info(
+    label: str, phase: str, raw_kernel_name: str = ""
+) -> tuple[str, str, bool, int]:
     """
     Maps raw stage kernel labels (e.g. 'Decode Linear GEMV' vs 'Decode Linear GEMM')
     to a unified (canonical_group, short_plot_label, is_core, sort_order).
     """
     lbl = label.lower()
+    raw = raw_kernel_name.lower()
     p = phase.capitalize() if phase else "Other"
     p_offset = 0 if p == "Prefill" else 100
 
@@ -104,6 +107,13 @@ def canonical_kernel_info(label: str, phase: str) -> tuple[str, str, bool, int]:
         return (f"{p} Linear (GEMM/GEMV)", f"{p} Linear", True, p_offset + 1)
     if "combine" in lbl:
         return (f"{p} Attention Combine", f"{p} Attn Combine", False, p_offset + 3)
+    if (
+        "flash_attention" in lbl
+        or "_flash_attention_fwd" in lbl
+        or "flash_attention" in raw
+        or "_flash_attention_fwd" in raw
+    ):
+        return (f"{p} Attention", f"{p} Attn", True, p_offset + 2)
     if "attention" in lbl or "flash" in lbl:
         return (f"{p} Attention", f"{p} Attn", True, p_offset + 2)
     if "rmsnorm" in lbl or "norm" in lbl:
@@ -185,7 +195,7 @@ def load_stage_data(stage_dir: Path) -> dict:
             ncu_data = json.load(fp)
             for k in ncu_data.get("kernels", []):
                 group, short_lbl, is_core, order = canonical_kernel_info(
-                    k.get("label", ""), k.get("phase", "")
+                    k.get("label", ""), k.get("phase", ""), k.get("raw_kernel_name", "")
                 )
                 k["canonical_group"] = group
                 k["short_label"] = short_lbl
