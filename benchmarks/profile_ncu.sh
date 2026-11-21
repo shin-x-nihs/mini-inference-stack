@@ -421,6 +421,10 @@ def get_duration_ns(row, units):
 def classify_kernel(kname, phase, nvtx_txt=""):
     kl = kname.lower()
     nl = (nvtx_txt or "").lower()
+    if "splitk_combine" in kl or "splitkv_combine" in kl:
+        return f"{phase} Attention Combine (Split-K)"
+    if "decode_splitk" in kl:
+        return f"{phase} Attention (Triton Split-K)"
     if "flash_attention" in kl or "_flash_attention_fwd" in kl:
         return f"{phase} Attention (Triton FlashAttention)"
     if "attn_compute" in nl:
