@@ -50,9 +50,24 @@ nsys_stats.txt
 # Local logs and generated output
 logs/
 *.log
-profiling/raw/
-benchmarks/results/raw/
-benchmarks/reports/generated/
+
+# LaTeX build artifacts and preview scratch images
+*.aux
+*.bbl
+*.bcf
+*.blg
+*.fdb_latexmk
+*.fls
+*.lof
+*.lot
+*.nav
+*.out
+*.run.xml
+*.snm
+*.synctex.gz
+*.toc
+paper/latex/main.pdf
+paper/scripts/preview/
 
 # Editors
 .idea/
@@ -74,8 +89,6 @@ desktop.ini
 UPDATE_PROMPT.md
 repomix-output.xml
 repomix.sh
-
-# Paper (blocked for now)
 
 # Local review reports
 **/REPORT.md
