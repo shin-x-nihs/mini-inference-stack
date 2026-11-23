@@ -74,3 +74,10 @@ desktop.ini
 UPDATE_PROMPT.md
 repomix-output.xml
 repomix.sh
+
+# Paper (blocked for now)
+paper/
+
+# Local review reports
+**/REPORT.md
+**/REPORT_2.md
