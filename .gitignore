@@ -76,7 +76,6 @@ repomix-output.xml
 repomix.sh
 
 # Paper (blocked for now)
-paper/
 
 # Local review reports
 **/REPORT.md
