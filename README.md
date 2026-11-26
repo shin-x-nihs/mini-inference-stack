@@ -28,6 +28,7 @@ The codebase has **two parallel tracks** (see [WORKFLOW.md](WORKFLOW.md#track-ph
 The goal is to learn by measuring: build a baseline, profile where time goes, change one part of the stack, and verify what actually improved.
 
 * **[Interactive Benchmark Dashboard ↗](https://shin-x-nihs.github.io/mini-inference-stack/)** (`benchmarks/results/dashboard.html`)
+* **[Systems Paper (PDF) →](paper/bottleneck_handoffs_llm_serving.pdf)** (`paper/bottleneck_handoffs_llm_serving.pdf`)
 * **[Full Experiment Log & Methodology →](REPORTS.md)** (`REPORTS.md`)
 * **[Benchmarking & Profiling Guide →](WORKFLOW.md)** (`WORKFLOW.md`)
 * **[Custom Engine Architecture →](custom-serving/README.md)** (`custom-serving/README.md`)
@@ -93,13 +94,17 @@ mini-inference-stack/
 │   ├── stage-4-paged-kv/           # Paged KV cache & continuous batching
 │   ├── stage-5-fused-ops/          # Fused Triton RMSNorm, RoPE, gate_up + SwiGLU
 │   └── stage-6-cuda-graphs/        # Bucketed CUDA Graphs for decode
-└── benchmarks/                     # Shared benchmark, profiling, and plotting suite
-    ├── bench_closed_loop.sh        # Concurrency (C=1..64) & context (L=128..8192) sweeps
-    ├── profile_nsys.sh             # Nsight Systems timeline capture & parser
-    ├── profile_ncu.sh              # Standalone Layer 0 Nsight Compute profiler
-    ├── plot_dashboard.py           # Generates benchmarks/results/dashboard.html
-    ├── results/                    # Committed JSON measurements & dashboard HTML
-    └── profiles/                   # Local profiler traces (.nsys-rep, .sqlite, .ncu-rep)
+├── benchmarks/                     # Shared benchmark, profiling, and plotting suite
+│   ├── bench_closed_loop.sh        # Concurrency (C=1..64) & context (L=128..8192) sweeps
+│   ├── profile_nsys.sh             # Nsight Systems timeline capture & parser
+│   ├── profile_ncu.sh              # Standalone Layer 0 Nsight Compute profiler
+│   ├── plot_dashboard.py           # Generates benchmarks/results/dashboard.html
+│   ├── results/                    # Committed JSON measurements & dashboard HTML
+│   └── profiles/                   # Local profiler traces (.nsys-rep, .sqlite, .ncu-rep)
+└── paper/                          # Systems paper & figure generation
+    ├── bottleneck_handoffs_llm_serving.pdf  # Compiled 6-page systems paper
+    ├── latex/                      # LaTeX source (main.tex, references.bib, figures/)
+    └── scripts/generate_figures.py # Regenerates vector figures from benchmarks/results/
 ```
 
 ---

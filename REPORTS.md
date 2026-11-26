@@ -33,9 +33,9 @@ Single-run closed-loop results (`n = 1` sweep per point) on `Qwen/Qwen2.5-Coder-
 * **NCU locked base clock:** `profile_ncu.sh` uses NCU's default `--clock-control base`, locking clocks below boost. NCU's internal `SOL%` counters (`DRAM SOL%`, `SM SOL%`) therefore read ~2× higher than `% of 896 GB/s`, and Layer 0 prefill GEMM sits at ~27 TFLOP/s (~95% SM SOL). Both `% of reference` and `NCU SOL%` are reported to match `dashboard.html`.
 
 ### 2. First-Principles Hardware Bounds (`Qwen2.5-Coder-1.5B-Instruct`, `bfloat16`)
-* **Model weight bytes:** 28 layers, `d = 1536`, `d_mlp = 8960`, 12 Q / 2 KV heads (GQA 6:1), `head_dim = 128`, tied embeddings → **1.54B params ≈ 3.09 GB**.
+* **Model weight bytes:** 28 layers, `d = 1536`, `d_mlp = 8960`, 12 Q / 2 KV heads (GQA 6:1), `head_dim = 128`, tied embeddings → **1.54B params ≈ 3.09 GB (2.88 GiB)**.
 * **Decode floor (`C = 1`):** Streaming all weights once per token sets a hard floor of `3.09 GB ÷ 896 GB/s = 3.45 ms/tok` (`~290 tok/s`).
-* **KV cache traffic:** `28 layers × 2 (K,V) × 2 KV heads × 128 × 2 B = 28 KiB/tok` → `14 MiB` at `L = 512`, `56 MiB` at `L = 2048`, `224 MiB` at `L = 8192` (`7.6%` of weight bytes). With KV caching, `C = 1` TPOT should stay nearly flat across `L = 128..8192`.
+* **KV cache traffic:** `28 layers × 2 (K,V) × 2 KV heads × 128 × 2 B = 28 KiB/tok` → `14 MiB` at `L = 512`, `56 MiB` at `L = 2048`, `224 MiB` / `235 MB` at `L = 8192` (`7.6%` of weight bytes). With KV caching, `C = 1` TPOT should stay nearly flat across `L = 128..8192`.
 * **Prefill attention vs. linear FLOPs:** Causal attention costs `~86k · L` FLOP/tok vs. `~2.62 GFLOP/tok` for linear layers (`ratio ≈ L / 30,500`): **1.7%** at `L = 512`, **6.7%** at `L = 2048`, **27%** at `L = 8192`. Below a few thousand tokens, prefill compute is mostly linear in `L`.
 
 ### 3. Workload & Measurement Artifacts

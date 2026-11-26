@@ -202,7 +202,7 @@ def make_fig1_pareto(data: dict[str, dict]) -> tuple[Path, Path]:
         ax.set_xscale("log")
         ax.set_yscale("log")
         ax.set_xlim(11, 4300)
-        ax.set_ylim(4.0, 560.0)
+        ax.set_ylim(3.15, 560.0)
         ax.set_xlabel("System Output Throughput (tok/s)")
         ax.set_title(title, pad=5)
 
@@ -232,16 +232,16 @@ def make_fig1_pareto(data: dict[str, dict]) -> tuple[Path, Path]:
     s2v_c64 = data["stage-2-vllm"]["pareto"][-1]
 
     ax_p50.annotate(
-        "S6-C beats S0-vLLM at all C\n(1,771 tok/s, 16.8 ms @ C=64)",
+        "S6-C leads S0-vLLM (C=1..64)\n(1,771 tok/s, 16.8 ms @ C=64)",
         xy=(s6_c64["throughput"], s6_c64["p50_itl"]),
-        xytext=(240, 4.45),
-        fontsize=6.5, fontweight="bold", color=STAGE_STYLE["stage-6-custom"]["color"],
+        xytext=(140, 3.38),
+        fontsize=6.15, fontweight="bold", color=STAGE_STYLE["stage-6-custom"]["color"],
         ha="left", va="bottom",
         arrowprops=dict(arrowstyle="->", color=STAGE_STYLE["stage-6-custom"]["color"], lw=0.85, connectionstyle="arc3,rad=0.18"),
-        bbox=dict(boxstyle="round,pad=0.2", fc="white", ec=STAGE_STYLE["stage-6-custom"]["color"], lw=0.6, alpha=0.95),
+        bbox=dict(boxstyle="round,pad=0.16", fc="white", ec=STAGE_STYLE["stage-6-custom"]["color"], lw=0.6, alpha=0.95),
     )
     ax_p50.annotate(
-        "S2-vLLM (C=64)\n2,874 tok/s\n(prefix cache)",
+        "S2-vLLM (C=64, h≈1)\n2,874 tok/s\n(prefix cache)",
         xy=(s2v_c64["throughput"], s2v_c64["p50_itl"]),
         xytext=(2150, 72),
         fontsize=6.5, fontweight="bold", color="#9e3b73",
@@ -370,7 +370,7 @@ def make_fig2_context_scaling(data: dict[str, dict]) -> tuple[Path, Path]:
         bbox=dict(boxstyle="round,pad=0.18", fc="white", ec=STAGE_STYLE["stage-6-custom"]["color"], lw=0.6, alpha=0.95),
     )
     ax_ttft.annotate(
-        "S2-vLLM: 198 ms\n(3.4× faster via\nprefix cache)",
+        "S2-vLLM: 198 ms\n(3.4× faster, h≈1\nprefix cache)",
         xy=(8192, 198.3), xytext=(4100, 56),
         fontsize=6.5, fontweight="bold", color="#9e3b73",
         ha="center", va="center",
@@ -388,7 +388,7 @@ def make_fig2_context_scaling(data: dict[str, dict]) -> tuple[Path, Path]:
 
     # Annotations on Panel (b)
     ax_tpot.annotate(
-        "S0-C (no KV cache):\n265.5 ms/tok at $L$=2k\n($O(L)$ recomputation)",
+        "S0-C (no KV cache):\n266 ms/tok at $L$=2k\n(full-seq recompute)",
         xy=(2048, 265.51), xytext=(2500, 108),
         fontsize=6.5, fontweight="bold", color=STAGE_STYLE["stage-0-custom"]["color"],
         ha="center", va="center",
@@ -403,7 +403,7 @@ def make_fig2_context_scaling(data: dict[str, dict]) -> tuple[Path, Path]:
         arrowprops=dict(arrowstyle="->", color="#66a61e", lw=0.8),
     )
     ax_tpot.annotate(
-        "S6-C: 7.5–8.6 ms/tok (beats S0-vLLM 9.0–10.7 ms)",
+        "S6-C: 7.5–8.6 ms/tok (vs. S0-vLLM 9.0–10.7 ms)",
         xy=(2048, 8.31), xytext=(1024, 4.1),
         fontsize=6.4, fontweight="bold", color=STAGE_STYLE["stage-6-custom"]["color"],
         ha="center", va="bottom",
@@ -443,7 +443,7 @@ def make_fig3_nsys_bottleneck(data: dict[str, dict]) -> tuple[Path, Path]:
         "stage-6-custom",
         "stage-0-vllm",
     ]
-    x_labels = ["S1-C", "S2-C", "S3-C", "S4-C", "S5-C", "S6-C", "S0-vLLM"]
+    x_labels = ["S1-C", "S2-C", "S3-C", "S4-C", "S5-C", "S6-C", "S0-vLLM*"]
     x = np.arange(len(stages), dtype=float)
     # Slight gap before vLLM reference bar
     x[-1] += 0.35
@@ -459,7 +459,7 @@ def make_fig3_nsys_bottleneck(data: dict[str, dict]) -> tuple[Path, Path]:
 
     bar_w = 0.56
 
-    # --- Panel (a): CPU Launch Calls (log) + CPU Launch Overhead (ms) ---
+    # --- Panel (a): CPU Launch Calls (log) + CUDA Launch API Time (ms) ---
     bar_colors = ["#4c78a8"] * 6 + ["#374151"]
     ax1.bar(x, calls, width=bar_w, color=bar_colors, edgecolor="#1f2937", linewidth=0.55, alpha=0.88, zorder=3)
     ax1.set_yscale("log")
@@ -471,7 +471,7 @@ def make_fig3_nsys_bottleneck(data: dict[str, dict]) -> tuple[Path, Path]:
     ax1.tick_params(axis="y", colors="#2b547e")
     ax1.set_xticks(x)
     ax1.set_xticklabels(x_labels, rotation=18, ha="right")
-    ax1.set_title("(a) Host Dispatch & Launch Overhead", pad=6)
+    ax1.set_title("(a) Host Dispatch & Launch API Time", pad=6)
     ax1.spines["top"].set_visible(False)
 
     # Bar value labels
@@ -479,17 +479,17 @@ def make_fig3_nsys_bottleneck(data: dict[str, dict]) -> tuple[Path, Path]:
         lbl = f"{c/1000:.1f}k" if c >= 1000 else f"{c}"
         ax1.text(xi, c * 1.18, lbl, ha="center", va="bottom", fontsize=6.3, color="#1f2937", fontweight="bold")
 
-    # Secondary axis: CPU Launch Overhead (ms)
+    # Secondary axis: CUDA Launch API Time (ms)
     ax1_r = ax1.twinx()
     ax1_r.plot(
         x, launch_ms,
         color="#d95f02", marker="o", markersize=4.5, linewidth=1.6,
         markeredgecolor="white", markeredgewidth=0.5, zorder=5,
-        label="Launch Overhead (ms)",
+        label="Launch API Time (ms)",
     )
     ax1_r.set_ylim(0, 1020)
     ax1_r.set_yticks([0, 200, 400, 600, 800, 1000])
-    ax1_r.set_ylabel("CPU Launch Overhead (ms)", color="#b44d00")
+    ax1_r.set_ylabel("CUDA Launch API Time (ms)", color="#b44d00")
     ax1_r.tick_params(axis="y", colors="#b44d00")
     ax1_r.grid(False)
     ax1_r.spines["top"].set_visible(False)
@@ -498,7 +498,7 @@ def make_fig3_nsys_bottleneck(data: dict[str, dict]) -> tuple[Path, Path]:
     sep_x = (x[5] + x[6]) / 2.0
     ax1.axvline(sep_x, color="#888888", linestyle=":", linewidth=0.9, zorder=2)
 
-    # Callouts for 3.03x and 50.6x drops
+    # Callouts for 3.03x and 50.6x drops + S6 blocking graph calls
     ax1.annotate(
         "3.03× drop\n(Fusion)",
         xy=(x[4], calls[4]), xytext=(x[3] - 0.15, 2200),
@@ -513,12 +513,20 @@ def make_fig3_nsys_bottleneck(data: dict[str, dict]) -> tuple[Path, Path]:
         arrowprops=dict(arrowstyle="->", color="#0072b2", lw=0.85, connectionstyle="arc3,rad=-0.12"),
         bbox=dict(boxstyle="round,pad=0.18", fc="white", ec="#0072b2", lw=0.6, alpha=0.95),
     )
+    ax1_r.annotate(
+        "285 ms\n(blocking\ngraph calls)",
+        xy=(x[5], launch_ms[5]), xytext=(x[5] + 0.35, 620),
+        fontsize=6.1, fontweight="bold", color="#b44d00", ha="center", va="center",
+        arrowprops=dict(arrowstyle="->", color="#b44d00", lw=0.8, connectionstyle="arc3,rad=-0.12"),
+        bbox=dict(boxstyle="round,pad=0.16", fc="white", ec="#d95f02", lw=0.6, alpha=0.95),
+        zorder=9,
+    )
 
     # Compact legend cleanly above title for Panel (a)
     h1 = [
         Patch(facecolor="#4c78a8", edgecolor="#1f2937", linewidth=0.5, label="Launch Calls (Custom)"),
         Patch(facecolor="#374151", edgecolor="#1f2937", linewidth=0.5, label="Launch Calls (vLLM)"),
-        Line2D([0], [0], color="#d95f02", marker="o", ms=4.2, lw=1.5, label="Launch Overhead (ms)"),
+        Line2D([0], [0], color="#d95f02", marker="o", ms=4.2, lw=1.5, label="Launch API Time (ms)"),
     ]
     ax1.legend(
         handles=h1, loc="lower center", bbox_to_anchor=(0.50, 1.13),
@@ -529,7 +537,7 @@ def make_fig3_nsys_bottleneck(data: dict[str, dict]) -> tuple[Path, Path]:
     # --- Panel (b): GPU Active vs. Idle (%) + Mean Decode Step (ms) ---
     ax2.bar(x, act_pct, width=bar_w, color="#1b9e77", edgecolor="#1f2937", linewidth=0.5, alpha=0.9, label="GPU Active (%)", zorder=3)
     ax2.bar(x, idle_pct, width=bar_w, bottom=act_pct, color="#e5e7eb", edgecolor="#6b7280", linewidth=0.5, hatch="///", alpha=0.9, label="GPU Idle (%)", zorder=3)
-    ax2.set_ylim(0, 118)
+    ax2.set_ylim(0, 126)
     ax2.set_yticks([0, 25, 50, 75, 100])
     ax2.set_ylabel("GPU Timeline Share (%)", color="#136f53")
     ax2.set_xticks(x)
@@ -566,9 +574,9 @@ def make_fig3_nsys_bottleneck(data: dict[str, dict]) -> tuple[Path, Path]:
     ax2_r.grid(False)
     ax2_r.spines["top"].set_visible(False)
 
-    # Annotate decode step drop at S6-C (8.64 ms) vs S0-vLLM (10.67 ms)
+    # Annotate decode step drop at S6-C (8.6 ms) vs S0-vLLM* (10.7 ms)
     ax2_r.annotate(
-        "8.64 ms",
+        "8.6 ms",
         xy=(x[5], dec_step[5]), xytext=(x[5] - 0.15, 4.0),
         fontsize=6.6, fontweight="bold", color="#111827", ha="center", va="top",
         arrowprops=dict(arrowstyle="->", color="#111827", lw=0.75),
@@ -576,7 +584,7 @@ def make_fig3_nsys_bottleneck(data: dict[str, dict]) -> tuple[Path, Path]:
         zorder=8,
     )
     ax2.text(
-        (x[1] + x[4]) / 2.0, 109.5,
+        (x[0] + x[4]) / 2.0, 115.5,
         "Idle: 53.5% → 29.0% → 9.0%",
         fontsize=6.4, fontweight="bold", color="#991b1b", ha="center", va="center",
         bbox=dict(boxstyle="round,pad=0.16", fc="#fff5f5", ec="#dc2626", lw=0.55, alpha=0.95),
@@ -640,7 +648,7 @@ def make_fig4_roofline(data: dict[str, dict]) -> tuple[Path, Path]:
     )
     ax.text(
         68.0, peak_compute_gflops * 1.15,
-        f"FP16 Tensor Ceiling: {peak_compute_tflops:.0f} TFLOP/s (40,000 GFLOP/s)",
+        f"Ref. BF16 Baseline: {peak_compute_tflops:.0f} TFLOP/s (config.yaml)",
         fontsize=6.9, fontweight="bold", color="#991b1b", ha="left", va="bottom",
     )
     ax.text(
@@ -653,7 +661,7 @@ def make_fig4_roofline(data: dict[str, dict]) -> tuple[Path, Path]:
 
     # Representative stages to display cleanly without 7-way overplotting
     rep_stages = [
-        ("stage-1-custom", "S1-C (SDPA)",        "#d95f02"),
+        ("stage-1-custom", "S1-C (Eager+KV)",    "#d95f02"),
         ("stage-2-custom", "S2-C (FlashAttn-2)", "#d4a017"),
         ("stage-3-custom", "S3-C (Split-K)",     "#1b9e77"),
         ("stage-6-custom", "S6-C (Fused+Graph)", "#0072b2"),
@@ -727,13 +735,13 @@ def make_fig4_roofline(data: dict[str, dict]) -> tuple[Path, Path]:
     )
     ax.text(
         480, 6200,
-        "S1→S2 FlashAttn-2:\n11.8× AI (135→1,598 FLOP/B)\n1,209 → 978 µs",
+        "S1→S2 FlashAttn-2:\n135→1,598 FLOP/B (vs. S1 BMM)\n>4,100 µs total → 978 µs",
         fontsize=6.6, fontweight="bold", color="#92400e", ha="center", va="top",
         bbox=dict(boxstyle="round,pad=0.2", fc="white", ec="#d97706", lw=0.65, alpha=0.94),
         zorder=11,
     )
 
-    # Arrow 2: Stage 2 -> Stage 3 Decode Attention (Split-K: 4.0x faster, 4.0x DRAM BW)
+    # Arrow 2: Stage 2 -> Stage 3 Decode Attention (Split-K: 3.3x combined speedup)
     s2_da = coords[("stage-2-custom", "decode_attn")]
     s3_da = coords[("stage-3-custom", "decode_attn")]
     ax.annotate(
@@ -745,7 +753,7 @@ def make_fig4_roofline(data: dict[str, dict]) -> tuple[Path, Path]:
     )
     ax.text(
         34, 155,
-        "S2→S3 Split-K Decode:\n4.0× faster (129→32 µs)\n4.0× DRAM BW (16→66 GB/s)",
+        "S2→S3 Split-K Decode:\n3.3× faster (129→39.7 µs)\nS2 AI inflated by BLOCK_M=16",
         fontsize=6.5, fontweight="bold", color="#0f766e", ha="center", va="bottom",
         bbox=dict(boxstyle="round,pad=0.2", fc="white", ec="#1b9e77", lw=0.65, alpha=0.95),
         zorder=11,
@@ -847,11 +855,11 @@ def make_fig0_progression() -> tuple[Path, Path]:
     stages = [
         ("S0 Naive",      "Eager PyTorch",   "14.9 tok/s (C=1)",  "O(S²) decode",      "#c0392b", "#fef2f2"),
         ("S1 KV Cache",   "Memoize (K,V)",   "37.3 tok/s (C=1)",  "54.3% GPU idle",    "#d95f02", "#fff7ed"),
-        ("S2 Triton FA-2","Online Softmax",  "44.0 tok/s (C=1)",  "11.8× prefill AI",  "#c99200", "#fefce8"),
+        ("S2 Triton FA-2","Online Softmax",  "44.0 tok/s (C=1)",  "−91% attn bytes",   "#c99200", "#fefce8"),
         ("S3 Split-K",    "Parallel Decode", "45.0 tok/s (C=1)",  "3.3× dec attn",     "#8c6216", "#faf5eb"),
         ("S4 Paged+Batch","Cont. Batching",  "1,260 tok/s (C=64)","91× lower TTFT",    "#4d7c0f", "#f4fce3"),
-        ("S5 Fused Ops",  "RMS/RoPE/SwiGLU", "68.4 / 1,486",      "3.0× fewer kern.",  "#0f766e", "#f0fdfa"),
-        ("S6 CUDA Graphs","Bucketed B=1..64","113.4 / 1,771",     "9.0% GPU idle",     "#0072b2", "#eff6ff"),
+        ("S5 Fused Ops",  "RMS/RoPE/SwiGLU", "68 / 1,486 tok/s",  "3.0× fewer kern.",  "#0f766e", "#f0fdfa"),
+        ("S6 CUDA Graphs","Bucketed B=1..64","113 / 1,771 tok/s", "9.0% GPU idle",     "#0072b2", "#eff6ff"),
     ]
 
     n = len(stages)
@@ -909,14 +917,14 @@ def make_fig0_progression() -> tuple[Path, Path]:
         fontsize=6.8, fontweight="bold", color="#334155", ha="left", va="center", zorder=2,
     )
     ax.text(
-        98.4, 5.85, "S6-C > S0-vLLM at all C & L",
+        98.4, 5.85, "S6-C matches/exceeds S0-vLLM (n=1)",
         fontsize=6.4, fontweight="bold", color="#0072b2", ha="right", va="center", zorder=2,
     )
 
     vllm_items = [
         (1.8,  30.6, "S0-vLLM Baseline",           "87.8 (C=1) | 1,232 (C=64) | 11.6% idle", "#1f2937", "#ffffff"),
         (33.8, 32.0, "S1-vLLM SpecDec (0.5B, K=5)","106.0 (C=1) | 872 (C=64) | 35.3% idle",  "#7570b3", "#f5f3ff"),
-        (67.2, 31.2, "S2-vLLM Prefix Cache",       "80.4 (C=1) | 2,874 (C=64) | -74.5% TTFT","#9e3b73", "#fdf2f8"),
+        (67.2, 31.2, "S2-vLLM Prefix Cache (h≈1)", "80.4 (C=1) | 2,874 (C=64) | −75% TTFT", "#9e3b73", "#fdf2f8"),
     ]
     for vx, vw, vtitle, vdesc, vcol, vbg in vllm_items:
         vc = FancyBboxPatch(
